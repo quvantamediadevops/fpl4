@@ -1,0 +1,21 @@
+node_modules
+.next
+.open-next
+.wrangler
+out
+*.tsbuildinfo
+next-env.d.ts
+.env
+.env.*
+!.env.example
+!.env.production
+.dev.vars
+.dev.vars.*
+cloudflare-env.d.ts
+.DS_Store
+
+# Google service account keys
+*service-account*.json
+*-sa-key*.json
+deeptiranjan-wp-*.json
+.cloudflare-setup.log

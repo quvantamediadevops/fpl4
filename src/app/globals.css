@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --color-ink: #111827;
+  --color-muted: #64748b;
+  --color-line: #e2e8f0;
+  --color-mist: #f8fafc;
+  --color-gold: #d4a72c;
+  --color-gold-2: #a87916;
+  --color-gold-light: #f5d98a;
+  --color-gold-deep: #8a6612;
+  --color-champion: #d4a72c; /* alias of gold, used by Teams */
+  --color-navy: #111827;
+  --color-navy-2: #1e293b;
+  --color-bat: #2563eb;
+  --color-bowl: #16a34a;
+  --color-bowl-deep: #15803d;
+  --color-ar: #7c3aed;
+
+  --shadow-card: 0 1px 2px rgb(17 24 39 / 0.04), 0 1px 1px rgb(17 24 39 / 0.03);
+  --shadow-lift: 0 12px 28px -12px rgb(17 24 39 / 0.18), 0 2px 6px rgb(17 24 39 / 0.05);
+
+  --breakpoint-xs: 22.5rem;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    scroll-padding-top: 5rem;
+  }
+  body {
+    @apply bg-white text-ink antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  ::selection {
+    background: var(--color-gold-light);
+    color: var(--color-ink);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-gold);
+    outline-offset: 2px;
+  }
+}
+
+@utility container-page {
+  width: 100%;
+  margin-inline: auto;
+  max-width: 76rem;
+  padding-inline: 1rem;
+  @media (width >= 40rem) {
+    padding-inline: 1.5rem;
+  }
+  @media (width >= 64rem) {
+    padding-inline: 2rem;
+  }
+}
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Mobile bottom nav height; page content is padded by it so nothing hides behind the bar. */
+@utility pb-safe-nav {
+  padding-bottom: calc(3.75rem + 1.25rem + env(safe-area-inset-bottom));
+  @media (width >= 48rem) {
+    padding-bottom: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

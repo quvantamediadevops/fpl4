@@ -1,0 +1,12 @@
+# Workers Static Assets headers (applied by Cloudflare to files in .open-next/assets).
+
+# Keep every static file (JS, CSS, fonts, images, robots.txt) out of search engines.
+/*
+  X-Robots-Tag: noindex, nofollow
+
+# Next.js build output is content-hashed, so it can be cached for a year.
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/og.png
+  Cache-Control: public, max-age=86400
