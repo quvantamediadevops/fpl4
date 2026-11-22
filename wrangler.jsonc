@@ -1,23 +1,28 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "fpl-season-4",
-  "main": ".open-next/worker.js",
-  "compatibility_date": "2026-11-01",
-  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
-  "assets": {
-    "directory": ".open-next/assets",
-    "binding": "ASSETS"
-  },
-  "kv_namespaces": [
-    {
-      "binding": "NEXT_INC_CACHE_KV",
-      // Replace with the id printed by: npx wrangler kv namespace create NEXT_INC_CACHE_KV
-      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
-    }
-  ],
-  "vars": {
-    "GOOGLE_SHEETS_SHEET_GID": "1030626861",
-    "GOOGLE_SHEETS_CACHE_SECONDS": "300"
-  },
-  "observability": { "enabled": true }
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "fpl-season-4",
+	"main": ".open-next/worker.js",
+	"compatibility_date": "2026-11-01",
+	"compatibility_flags": [
+		"nodejs_compat",
+		"global_fetch_strictly_public"
+	],
+	"assets": {
+		"directory": ".open-next/assets",
+		"binding": "ASSETS"
+	},
+	"kv_namespaces": [
+		{
+			// Player-data cache + OpenNext incremental cache. Name must stay NEXT_INC_CACHE_KV.
+			"binding": "NEXT_INC_CACHE_KV",
+			"id": "001f67ffce054773abfd1ce0c77862a3"
+		}
+	],
+	"vars": {
+		"GOOGLE_SHEETS_SHEET_GID": "1030626861",
+		"GOOGLE_SHEETS_CACHE_SECONDS": "300"
+	},
+	"observability": {
+		"enabled": true
+	}
 }
