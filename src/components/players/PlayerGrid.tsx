@@ -15,11 +15,13 @@ export function PlayerGrid({
   players,
   animate = true,
   priorityCount = 0,
+  showNumbers = true,
 }: {
   players: PublicPlayer[];
   /** false on first paint so server-rendered cards are visible before hydration. */
   animate?: boolean;
   priorityCount?: number;
+  showNumbers?: boolean;
 }) {
   return (
     <m.ul
@@ -30,7 +32,7 @@ export function PlayerGrid({
     >
       {players.map((player, i) => (
         <m.li key={player.id} variants={item}>
-          <PlayerCard player={player} priority={i < priorityCount} />
+          <PlayerCard player={player} priority={i < priorityCount} showNumber={showNumbers} />
         </m.li>
       ))}
     </m.ul>

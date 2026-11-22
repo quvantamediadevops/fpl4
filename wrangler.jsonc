@@ -20,7 +20,9 @@
 	],
 	"vars": {
 		"GOOGLE_SHEETS_SHEET_GID": "1030626861",
-		"GOOGLE_SHEETS_CACHE_SECONDS": "300"
+		"GOOGLE_SHEETS_CACHE_SECONDS": "300",
+		// "on" once Google Drive photo access is configured; "off" shows initials avatars.
+		"PLAYER_PHOTOS": "off"
 	},
 	"observability": {
 		"enabled": true

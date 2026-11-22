@@ -16,9 +16,26 @@ if (!/^https:\/\/[^/]+\.[^/]+/.test(url) || /localhost|127\.0\.0\.1|example\.com
 }
 
 // 2. KV namespace for the data cache must be a real id.
-const wrangler = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
-if (/REPLACE_WITH_KV_NAMESPACE_ID/.test(wrangler)) {
-  problems.push("wrangler.jsonc: kv_namespaces[0].id is still a placeholder. Run: npx wrangler kv namespace create NEXT_INC_CACHE_KV");
+const raw = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
+let wrangler = null;
+try {
+  // strip // and /* */ comments (outside strings) and trailing commas, then parse
+  const json = raw
+    .replace(/("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m, str) => str ?? "")
+    .replace(/,(\s*[}\]])/g, "$1");
+  wrangler = JSON.parse(json);
+} catch {
+  problems.push("wrangler.jsonc could not be parsed.");
+}
+if (wrangler) {
+  const kv = (wrangler.kv_namespaces ?? []).filter((n) => n.binding === "NEXT_INC_CACHE_KV");
+  if (kv.length !== 1) {
+    problems.push(`wrangler.jsonc: expected exactly one kv_namespaces entry with binding "NEXT_INC_CACHE_KV", found ${kv.length}.`);
+  } else if (!/^[0-9a-f]{32}$/.test(kv[0].id ?? "")) {
+    problems.push("wrangler.jsonc: NEXT_INC_CACHE_KV id is not a real namespace id (32 hex characters). Run: npx wrangler kv namespace create NEXT_INC_CACHE_KV");
+  } else {
+    console.log(`✓ KV binding NEXT_INC_CACHE_KV → ${kv[0].id}${kv[0].remote ? " (remote: true — local dev would use production KV)" : ""}`);
+  }
 }
 
 if (problems.length) {

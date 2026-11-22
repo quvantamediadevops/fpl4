@@ -1,7 +1,6 @@
-import { Hash, ShieldCheck, Trophy } from "lucide-react";
 import type { PublicPlayer } from "@/types/player";
 import { site } from "@/config/site";
-import { formatNumber, roleMeta } from "@/lib/utils";
+import { tournament } from "@/config/tournament";
 import { PlayerPhoto } from "@/components/players/PlayerPhoto";
 import { RoleBadge } from "@/components/players/RoleBadge";
 import { BackButton } from "@/components/players/BackButton";
@@ -9,12 +8,6 @@ import { Emblem } from "@/components/layout/Logo";
 import { FadeIn } from "@/components/ui/FadeIn";
 
 export function PlayerProfile({ player }: { player: PublicPlayer }) {
-  const details = [
-    { icon: Hash, label: "Player number", value: formatNumber(player.number) },
-    { icon: ShieldCheck, label: "Playing role", value: player.role ? roleMeta[player.role].label : "To be confirmed" },
-    { icon: Trophy, label: "Tournament", value: `${site.name} – ${site.season}` },
-  ];
-
   return (
     <article className="container-page pt-5 sm:pt-8">
       <BackButton />
@@ -28,7 +21,7 @@ export function PlayerProfile({ player }: { player: PublicPlayer }) {
             <div className="absolute -bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-line bg-white py-1.5 pr-4 pl-2 shadow-card">
               <Emblem className="h-6 w-5" />
               <span className="text-[10px] font-extrabold tracking-[0.12em] whitespace-nowrap">
-                {site.short} · {formatNumber(player.number)}
+                FPL · {site.seasonUpper}
               </span>
             </div>
           </div>
@@ -43,23 +36,17 @@ export function PlayerProfile({ player }: { player: PublicPlayer }) {
           </h1>
           <RoleBadge role={player.role} size="md" className="mt-4" />
 
-          <dl className="mt-8 divide-y divide-line overflow-hidden rounded-2xl border border-line bg-white">
-            {details.map(({ icon: Icon, label, value }) => (
-              <div key={label} className="flex items-center gap-4 px-4 py-4 sm:px-5">
-                <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-mist text-gold-deep ring-1 ring-line">
-                  <Icon className="size-[18px]" strokeWidth={1.9} aria-hidden="true" />
-                </span>
-                <div className="min-w-0">
-                  <dt className="text-xs font-medium text-muted">{label}</dt>
-                  <dd className="mt-0.5 text-[15px] font-semibold break-words">{value}</dd>
-                </div>
-              </div>
-            ))}
-          </dl>
-          <p className="mt-4 text-xs leading-relaxed text-muted">
-            Player number is assigned by this website in registration order. Match statistics will be published once
-            official scorecards are available.
-          </p>
+          <div className="mt-8 flex items-center gap-4 rounded-2xl border border-line bg-white px-4 py-4 shadow-card sm:px-5">
+            <span className="inline-flex size-12 shrink-0 items-center justify-center rounded-xl bg-ink">
+              <Emblem className="h-8 w-7" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[15px] leading-snug font-extrabold tracking-tight break-words">{site.name}</p>
+              <p className="mt-0.5 text-sm text-muted">
+                {site.season} · {tournament.year}
+              </p>
+            </div>
+          </div>
         </FadeIn>
       </div>
     </article>

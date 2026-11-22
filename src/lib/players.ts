@@ -145,8 +145,15 @@ export function findPlayer(dataset: PlayerDataset, idOrKey: string): PlayerRecor
   return dataset.players.find((p) => p.key === key);
 }
 
+/**
+ * Player photos are off until Google Drive access is set up (PLAYER_PHOTOS=on).
+ * While off, cards show the initials avatar immediately and no photo requests are made.
+ * The /api/photos proxy stays in place for when photos are enabled.
+ */
+const photosEnabled = () => process.env.PLAYER_PHOTOS === "on";
+
 export function photoPath(player: PlayerRecord): string | null {
-  return player.photoSource ? `/api/photos/${player.key}` : null;
+  return photosEnabled() && player.photoSource ? `/api/photos/${player.key}` : null;
 }
 
 /** Strips server-only fields. Use for every object passed to the client. */

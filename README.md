@@ -54,6 +54,8 @@ Do **not** make the sheet public. The service account is enough.
 
 ## 2. Player photos (Google Drive)
 
+Photos are **off** by default (`PLAYER_PHOTOS=off` in `wrangler.jsonc` and env files): every player shows an initials avatar and no Drive requests are made. After completing the steps below, set `PLAYER_PHOTOS` to `on` and redeploy.
+
 Google Forms saves uploads to the form owner's Drive, inside the form's folder, with **one subfolder per file-upload question** (e.g. `PLAYER PHOTO (File responses)` and `PAYMENT SCREENSHOT (File responses)`).
 
 **Recommended:** share **only the `PLAYER PHOTO (File responses)` folder** with the service account email as **Viewer**. Photos then work while staying private in Drive. Never share the payment screenshot folder.
@@ -147,7 +149,7 @@ npx wrangler login                                   # opens the browser; no tok
 npx wrangler kv namespace create NEXT_INC_CACHE_KV   # copy the printed id
 ```
 
-Paste the id into `wrangler.jsonc` → `kv_namespaces[0].id` (replace `REPLACE_WITH_KV_NAMESPACE_ID`). Create it **once**; reuse the same id afterwards.
+Paste the id into `wrangler.jsonc` → the `NEXT_INC_CACHE_KV` entry's `id`. Create it **once**; reuse the same id afterwards. Configured: `001f67ffce054773abfd1ce0c77862a3`. Keep local development on simulated KV (no `"remote": true`) so tests never write to the production cache.
 
 Secrets (each command prompts for the value; nothing is stored in files or shell history):
 

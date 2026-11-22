@@ -65,7 +65,7 @@ export default async function PlayerPage({ params }: PageProps<"/players/[id]">)
               VIEW ALL
             </ButtonLink>
           </div>
-          <PlayerGrid players={related} animate={false} />
+          <PlayerGrid players={related} animate={false} showNumbers={false} />
         </section>
       )}
     </>
