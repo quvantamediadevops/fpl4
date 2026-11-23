@@ -54,17 +54,40 @@ Do **not** make the sheet public. The service account is enough.
 
 ## 2. Player photos (Google Drive)
 
-Photos are **off** by default (`PLAYER_PHOTOS=off` in `wrangler.jsonc` and env files): every player shows an initials avatar and no Drive requests are made. After completing the steps below, set `PLAYER_PHOTOS` to `on` and redeploy.
+Photos are **off** (`PLAYER_PHOTOS=off`): every player shows an initials avatar and the photo proxy makes no Google calls. Turn them on only after `npm run check:photos` passes.
 
-Google Forms saves uploads to the form owner's Drive, inside the form's folder, with **one subfolder per file-upload question** (e.g. `PLAYER PHOTO (File responses)` and `PAYMENT SCREENSHOT (File responses)`).
+### How it works
 
-**Recommended:** share **only the `PLAYER PHOTO (File responses)` folder** with the service account email as **Viewer**. Photos then work while staying private in Drive. Never share the payment screenshot folder.
+```
+browser ──► /api/photos/<player key>?w=240|480|960      (Worker)
+              ├─ only keys of registered players; Drive IDs/URLs never reach the browser
+              ├─ Cloudflare edge cache (7 days; misses 1–60 min) shared by all Worker instances
+              ├─ one in-flight Google fetch per photo+size (concurrent requests share it)
+              └─ Drive API with the service account (drive.readonly):
+                   files.get metadata ─► Drive's resized rendition (JPEG/PNG, also for HEIC)
+                                     └─► original file, only if JPEG/PNG/WebP and ≤ 8 MB
+                   bytes are verified as JPEG/PNG/WebP before being served
+```
 
-Alternative: set photo files to "Anyone with the link – Viewer". The site falls back to Drive's public thumbnail endpoint.
+Failures (API disabled, folder not shared, deleted file, not an image, unsupported format) return 404 → the initials avatar; the reason is logged server-side as `[photos] <key> unavailable: <reason>`. Nothing is made public and no public Drive endpoints are used.
 
-If a photo is private, deleted or not an image, the player shows an initials avatar instead. When the sharing is fixed, the photo appears within about 5 minutes.
+### What the Form owner must do (their Google account)
 
-Column D can also hold any direct `https://` image URL (JPEG/PNG/WebP).
+1. Open Google Drive → the Form's upload folder → the **`PLAYER PHOTO (File responses)`** subfolder (only this one — never the payment screenshot folder).
+2. Share → add `fpl-sheets-reader@deeptiranjan-wp.iam.gserviceaccount.com` → **Viewer** → untick "Notify people" → Share.
+   Do **not** change General access; the folder stays private.
+
+### What you must do (your Google Cloud project `deeptiranjan-wp`)
+
+3. Google Cloud console → APIs & Services → Library → **Google Drive API** → **Enable**.
+
+### Activate
+
+4. Run `npm run check:photos`. It reports, by sheet row, which photos the service account can read and why others cannot (API disabled / not shared / not an image), then test-downloads one resized photo. Proceed when it ends with `✓ All 89/89 player photos readable`.
+5. Set `PLAYER_PHOTOS` to `on` in `wrangler.jsonc` (production) and `.env.local` / `.dev.vars` (local).
+6. Redeploy (`npm run deploy`). Photos appear immediately; each size is fetched from Google once and then served from the edge cache.
+
+New registrations' photos work automatically as long as they land in the shared folder (Google Forms keeps using the same folder).
 
 ## 3. Run locally
 

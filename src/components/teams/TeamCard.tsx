@@ -59,7 +59,7 @@ export function TeamCard({ team }: { team: Team }) {
         />
         <TeamCrest
           team={team}
-          className="w-[60px] [container-type:inline-size] transition-transform duration-300 group-hover:scale-[1.06] sm:w-[84px]"
+          className="w-[72px] transition-transform duration-300 group-hover:scale-[1.06] sm:w-24"
         />
         <span aria-hidden="true" className="absolute inset-y-0 right-0 w-[3px] bg-champion sm:inset-x-0 sm:top-auto sm:bottom-0 sm:h-[3px] sm:w-auto" />
       </div>

@@ -1,0 +1,2 @@
+# Never upload macOS metadata files as public assets
+.DS_Store

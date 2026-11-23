@@ -10,3 +10,7 @@
 
 /og.png
   Cache-Control: public, max-age=86400
+
+# Team logos: not content-hashed, so cache for a week (rename the file to force an update).
+/Teamlogo/*
+  Cache-Control: public, max-age=604800

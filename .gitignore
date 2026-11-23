@@ -8,7 +8,6 @@ next-env.d.ts
 .env
 .env.*
 !.env.example
-!.env.production
 .dev.vars
 .dev.vars.*
 cloudflare-env.d.ts
@@ -19,3 +18,6 @@ cloudflare-env.d.ts
 *-sa-key*.json
 deeptiranjan-wp-*.json
 .cloudflare-setup.log
+.cloudflare-diagnose.log
+.tail.tmp
+.env.production

@@ -8,7 +8,7 @@ export interface Team {
   icon: string;
   /** Short text mark shown when no logo image is supplied. */
   monogram: string;
-  /** Optional logo under /public, e.g. /teams/msct.png */
+  /** Official logo under /public, e.g. /Teamlogo/MSCT.jpeg (initials shown if missing or it fails to load). */
   logo?: string;
 }
 

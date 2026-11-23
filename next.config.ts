@@ -10,8 +10,9 @@ const nextConfig: NextConfig = {
     // optimisation binding is needed on Cloudflare.
     loader: "custom",
     loaderFile: "./src/lib/image-loader.ts",
-    deviceSizes: [360, 480, 720, 960, 1200],
-    imageSizes: [96, 160, 240],
+    // Matches the proxy's three renditions (240/480/960) so each photo needs few Google fetches.
+    deviceSizes: [480, 960],
+    imageSizes: [240],
   },
   experimental: {
     optimizePackageImports: ["lucide-react"],
