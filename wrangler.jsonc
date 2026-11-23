@@ -2,6 +2,8 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "fpl-season-4",
 	"main": ".open-next/worker.js",
+	// Keep variables set in the Cloudflare dashboard on deploy. Vars listed below still win for their own names.
+	"keep_vars": true,
 	"compatibility_date": "2026-11-01",
 	"compatibility_flags": [
 		"nodejs_compat",

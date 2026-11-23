@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+/* Presentation screen: side-by-side layout on large screens and on phones held landscape. */
+@custom-variant wide {
+  @media (min-width: 1024px) {
+    @slot;
+  }
+  @media (orientation: landscape) and (min-width: 640px) and (max-width: 1023.98px) {
+    @slot;
+  }
+}
+
 @theme {
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 
@@ -81,4 +91,50 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Player presentation (/player-presentation): a full-viewport broadcast screen.
+   While it is on the page, the site chrome is removed so it owns the whole display. */
+body:has([data-presentation]) > header,
+body:has([data-presentation]) .pb-safe-nav > footer,
+body:has([data-presentation]) nav[aria-label="Quick navigation"] {
+  display: none;
+}
+body:has([data-presentation]) .pb-safe-nav {
+  padding-bottom: 0;
+}
+body:has([data-presentation]) {
+  background: #05070d;
+  overflow: hidden;
+}
+
+/* Angled gold photo frame: top-left and bottom-right corners cut at 45°. */
+.presentation-frame {
+  --cut: clamp(1.5rem, 2.8vw, 3.4rem);
+  --rim: clamp(3px, 0.3vw, 6px);
+}
+.presentation-chamfer {
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+}
+.presentation-chamfer-inner {
+  --c: calc(var(--cut) - var(--rim) * 0.586);
+  clip-path: polygon(var(--c) 0, 100% 0, 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, 0 100%, 0 var(--c));
+}
+/* Gold tick running parallel to each cut corner, just outside the frame. */
+.presentation-tick {
+  position: absolute;
+  width: calc(var(--cut) * 1.1);
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, #f5d98a 30%, #f5d98a 70%, transparent);
+  box-shadow: 0 0 12px rgb(245 217 138 / 0.8);
+  transform: rotate(-45deg);
+}
+.presentation-tick[data-corner="tl"] {
+  left: calc(var(--cut) * -0.05 - 0.55rem);
+  top: calc(var(--cut) * 0.5 - 0.55rem - 1px);
+}
+.presentation-tick[data-corner="br"] {
+  right: calc(var(--cut) * -0.05 - 0.55rem);
+  bottom: calc(var(--cut) * 0.5 - 0.55rem - 1px);
 }
