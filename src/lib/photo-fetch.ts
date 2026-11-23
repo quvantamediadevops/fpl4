@@ -52,15 +52,19 @@ async function readImage(response: Response): Promise<PhotoResult> {
   return type ? { ok: true, body, contentType: type } : { ok: false, reason: "unsupported_format" };
 }
 
+/** Per-request limit so a slow or hanging Google response becomes "unavailable" (initials), never a stuck image. */
+const GOOGLE_TIMEOUT_MS = 8_000;
+
 async function get(url: string, token?: string): Promise<Response | null> {
   try {
     return await fetch(url, {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       cache: "no-store",
       redirect: "follow",
+      signal: AbortSignal.timeout(GOOGLE_TIMEOUT_MS),
     });
   } catch {
-    return null;
+    return null; // network error or timeout → upstream_error → initials, retried after 60 s
   }
 }
 
