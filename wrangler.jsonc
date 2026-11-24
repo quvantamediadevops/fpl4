@@ -1,7 +1,9 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "fpl-season-4",
-	"main": ".open-next/worker.js",
+	// Production Worker (serves cricket.deeptiranjan.com; Git-connected to quvantamediadevops/fpl4).
+	"name": "fpl4",
+	// worker.ts wraps the OpenNext handler (.open-next/worker.js) unchanged and adds the auction live channel.
+	"main": "worker.ts",
 	// Keep variables set in the Cloudflare dashboard on deploy. Vars listed below still win for their own names.
 	"keep_vars": true,
 	"compatibility_date": "2026-11-01",
@@ -20,6 +22,21 @@
 			"id": "001f67ffce054773abfd1ce0c77862a3"
 		}
 	],
+	// Auction database (permanent record): production D1 "fpl-auction" (APAC). Schema changes go in migrations/
+	// and are applied with: npx wrangler d1 migrations apply AUCTION_DB --remote (before pushing).
+	"d1_databases": [
+		{
+			"binding": "AUCTION_DB",
+			"database_name": "fpl-auction",
+			"database_id": "fb26bb44-2d84-4bb4-a200-9cca835618dd",
+			"migrations_dir": "migrations"
+		}
+	],
+	// Single-writer auction room + live WebSocket fan-out.
+	"durable_objects": {
+		"bindings": [{ "name": "AUCTION_ROOM", "class_name": "AuctionRoom" }]
+	},
+	"migrations": [{ "tag": "auction-v1", "new_sqlite_classes": ["AuctionRoom"] }],
 	"vars": {
 		"GOOGLE_SHEETS_SHEET_GID": "1030626861",
 		"GOOGLE_SHEETS_CACHE_SECONDS": "300",

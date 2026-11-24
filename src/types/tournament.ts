@@ -4,7 +4,7 @@ export interface Team {
   slug: string;
   name: string;
   owner: string;
-  /** The team's icon player. */
+  /** The team's icon player: pre-assigned before the auction, outside the auction budget. */
   icon: string;
   /** Short text mark shown when no logo image is supplied. */
   monogram: string;

@@ -34,7 +34,7 @@ export const tournament: TournamentDetails = {
     township: "Fertilizer Township",
     sector: "Sector 22",
   },
-  auction: { date: "2026-11-28", time: "17:00", budget: 3500 },
+  auction: { date: "2026-11-28", time: "17:00", budget: 4000 },
   matchStart: "2026-12-05",
   deadlines: { team: "2026-11-20", player: "2026-11-25" },
   prizes: { winner: 50000, runnerUp: 30000 },

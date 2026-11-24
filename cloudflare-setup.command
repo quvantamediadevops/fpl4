@@ -7,7 +7,10 @@ cd "$(dirname "$0")" || exit 1
 LOG=".cloudflare-setup.log"
 OLD_KEY_PREFIX="3e4ad9d7"
 KV_TITLE="NEXT_INC_CACHE_KV"
-WORKER="fpl-season-4"
+WORKER="fpl4"
+# NOTE: production (fpl4) already has its Google Sheets configuration as dashboard runtime
+# variables. Do not re-run this script against production: putting secrets with the same
+# names would clash with those variables.
 : > "$LOG"
 log() { echo "$1" | tee -a "$LOG"; }
 fail() { log "FAILED: $1"; echo; read -n 1 -s -r -p "Press any key to close…"; exit 1; }

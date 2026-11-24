@@ -174,7 +174,7 @@ npx wrangler kv namespace create NEXT_INC_CACHE_KV   # copy the printed id
 
 Paste the id into `wrangler.jsonc` → the `NEXT_INC_CACHE_KV` entry's `id`. Create it **once**; reuse the same id afterwards. Configured: `001f67ffce054773abfd1ce0c77862a3`. Keep local development on simulated KV (no `"remote": true`) so tests never write to the production cache.
 
-Secrets (each command prompts for the value; nothing is stored in files or shell history):
+The production Worker is **`fpl4`** (serves `cricket.deeptiranjan.com`). On `fpl4` the Google Sheets values are set as runtime variables in the dashboard and are kept on every deploy by `"keep_vars": true`; do not also add them as secrets with the same names. For a new Worker, set them as secrets (each command prompts for the value; nothing is stored in files or shell history):
 
 ```bash
 npx wrangler secret put GOOGLE_SHEETS_SPREADSHEET_ID
@@ -187,10 +187,10 @@ npx wrangler secret put GOOGLE_SHEETS_PRIVATE_KEY      # paste private_key from 
 Production URL (build-time, not secret). Create `.env.production`:
 
 ```
-NEXT_PUBLIC_SITE_URL=https://fpl-season-4.<your-subdomain>.workers.dev
+NEXT_PUBLIC_SITE_URL=https://cricket.deeptiranjan.com
 ```
 
-(or your custom domain). Do not put it in `.env.local` — that file overrides `.env.production` during deploy builds.
+(the production custom domain). Do not put it in `.env.local` — that file overrides `.env.production` during deploy builds.
 
 ### Preview locally in the real Workers runtime
 
@@ -204,18 +204,18 @@ npm run preview          # builds, then serves on http://localhost:8787 using .d
 npm run deploy           # check:deploy guard → opennextjs-cloudflare build → deploy
 ```
 
-`check:deploy` refuses to continue if the KV id is still a placeholder or the site URL is missing/localhost.
+`check:deploy` refuses to continue if the Worker name is not `fpl4`, the KV or auction D1 id is a placeholder, or the site URL is missing/localhost.
 
 ### Git-connected builds (Workers Builds) — optional
 
-Dashboard → Workers & Pages → Create → Import a repository, then:
+Production is Git-connected: Worker **`fpl4`** ← `quvantamediadevops/fpl4`, branch `main`. The `name` in `wrangler.jsonc` must stay `fpl4`, or builds will not deploy to it. Settings:
 
 | Setting | Value |
 |---|---|
 | Build command | `npx opennextjs-cloudflare build` |
 | Deploy command | `npx opennextjs-cloudflare deploy` |
 | Build variable | `NEXT_PUBLIC_SITE_URL` = production URL |
-| Runtime secrets | the three `wrangler secret put` values above |
+| Runtime variables / secrets | Google Sheets values (dashboard), `AUCTION_ADMINS`, `AUCTION_SESSION_SECRET` |
 
 Before the first push: `git init`, then confirm `git status` does not list `.env.local`, `.dev.vars` or any `*.json` key file (all are git-ignored).
 
@@ -224,6 +224,39 @@ Before the first push: `git init`, then confirm `git status` does not list `.env
 - Worker size ≈ 1.4 MB gzipped (free plan limit 3 MB).
 - KV: player data is written at most once per cache interval (≈ 288 writes/day at 300 s; free plan allows 1,000/day).
 - `/_next/static/*` is served `immutable` for a year via `public/_headers`. Player photos are edge-cached for 7 days; unavailable photos for 5 minutes.
+
+## 8. Player auction (physical auction system)
+
+Routes: `/auction/admin` (control room, sign-in required), `/auction/presenter` (big screen, public, read-only), `/auction/teams` (public squads). All are `noindex, nofollow`.
+
+**How it works**
+- Teams bid in the room; the admin records the result. There is no online bidding.
+- Cloudflare D1 (`AUCTION_DB`) is the permanent record. The `AuctionRoom` Durable Object runs every admin action one at a time and pushes live state to the screens over WebSockets.
+- Each sale is one D1 transaction. The database itself refuses a second live sale of a player, a reused confirmation, and any change or deletion of sales or audit events.
+- Rules are stored in the database (`auction_settings`): budget ₹4,000, 11 auction players per team plus the pre-assigned icon (12 in total), any whole-rupee price from ₹100 to ₹3,000. The maximum price for a team's next player is `min(3000, remaining − 100 × slots left after this one)`.
+- Icon players come from `src/config/tournament.ts` (`icon`). They are separate people from the registrations (a registered player with the same name stays in the auction), are pre-assigned to their team and cost nothing.
+
+**One-time production setup on Worker `fpl4` (needs approval; not done yet)**
+1. `npx wrangler d1 create fpl-auction --location apac` and paste its `database_id` into `wrangler.jsonc` (`AUCTION_DB`, replacing the placeholder).
+2. `npx wrangler d1 migrations apply AUCTION_DB --remote`
+3. Create admin accounts: `node scripts/auction-admin.mjs <name> [<name> …]`. It prints each password once, then two values to store as secrets: `npx wrangler secret put AUCTION_ADMINS --name fpl4` (PBKDF2 password hashes) and `npx wrangler secret put AUCTION_SESSION_SECRET --name fpl4` (session-signing key; set once).
+4. `npm run check:deploy`, then commit and push to `main` (Git-connected deploy). The `AuctionRoom` Durable Object is created by the `auction-v1` migration in `wrangler.jsonc`. `check:deploy` blocks until step 1 is done.
+
+**On the day**
+1. Sign in at `/auction/admin`, press **Load pool from registrations** (copies the current registrations; must be exactly 8 × 11 = 88), check the icons, then **Start auction**.
+2. Open `/auction/presenter` on the big screen and press **Fullscreen**.
+3. Per player: select → physical bidding → choose the winning team and price → **Confirm sold** (or **Mark unsold**; unsold players can be selected again later).
+4. Mistakes: **Correct** in the sales ledger, with a reason. The original sale is kept and marked reversed.
+5. **Complete** only succeeds when all 88 are sold and every team has 11. Then download the CSV or print the team report.
+
+**Local development**
+- The auction needs the Workers runtime: its Durable Object and live channel are in `worker.ts`, which `next dev` does not load. Under `npm run dev` the auction pages show a notice instead.
+- Run `npm run auction:local`. It applies the migration to the local D1 database (`.wrangler/state`, never `--remote`), builds, and starts the preview at http://localhost:8787 (`/auction/admin`, `/auction/presenter`, `/auction/teams`).
+- Test login: put `AUCTION_ADMINS` and `AUCTION_SESSION_SECRET` from `node scripts/auction-admin.mjs local-admin` in `.dev.vars`. That file is gitignored and only used locally.
+
+**Tests**
+- `npm run test:auction`: rule tests (budget, reserve, limits, start and completion checks).
+- `node scripts/auction-smoke.mjs`: a full auction against a local preview only (refuses non-local URLs). Needs a freshly migrated local database: `npx wrangler d1 migrations apply AUCTION_DB --local`.
 
 ## Search engines
 

@@ -10,7 +10,7 @@ const problems = [];
 const url = process.env.NEXT_PUBLIC_SITE_URL ?? "";
 if (!/^https:\/\/[^/]+\.[^/]+/.test(url) || /localhost|127\.0\.0\.1|example\.com/.test(url)) {
   problems.push(
-    "NEXT_PUBLIC_SITE_URL must be the production https URL (e.g. https://fpl-season-4.<subdomain>.workers.dev or your domain). " +
+    "NEXT_PUBLIC_SITE_URL must be the production https URL (e.g. https://cricket.deeptiranjan.com). " +
       "Set it in .env.production or in the shell for this command.",
   );
 }
@@ -38,9 +38,36 @@ if (wrangler) {
   }
 }
 
+// 3. Production Worker name: Git-connected builds deploy only when this matches the dashboard Worker.
+const PRODUCTION_WORKER = "fpl4";
+if (wrangler && wrangler.name !== PRODUCTION_WORKER) {
+  problems.push(`wrangler.jsonc: "name" is "${wrangler.name}" but the production Worker is "${PRODUCTION_WORKER}".`);
+}
+
+// 4. Auction: D1 database id must be real, and the custom entry must be in place.
+if (wrangler) {
+  const d1 = (wrangler.d1_databases ?? []).filter((d) => d.binding === "AUCTION_DB");
+  if (d1.length !== 1) {
+    problems.push('wrangler.jsonc: expected exactly one d1_databases entry with binding "AUCTION_DB".');
+  } else if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(d1[0].database_id ?? "")) {
+    problems.push(
+      "wrangler.jsonc: AUCTION_DB database_id is still the placeholder — the production D1 database has not been created yet. " +
+        "With approval: npx wrangler d1 create fpl-auction --location apac, paste its database_id into wrangler.jsonc, " +
+        "then npx wrangler d1 migrations apply AUCTION_DB --remote. Do not push until this is done.",
+    );
+  } else {
+    console.log(`✓ D1 binding AUCTION_DB → ${d1[0].database_name} (${d1[0].database_id})`);
+  }
+  const dob = (wrangler.durable_objects?.bindings ?? []).some((b) => b.name === "AUCTION_ROOM" && b.class_name === "AuctionRoom");
+  if (!dob) problems.push('wrangler.jsonc: Durable Object binding AUCTION_ROOM → AuctionRoom is missing.');
+  if (wrangler.main !== "worker.ts") problems.push('wrangler.jsonc: "main" must be "worker.ts" (it wraps OpenNext and exports AuctionRoom).');
+  if (wrangler.keep_vars !== true) problems.push('wrangler.jsonc: "keep_vars": true is missing (dashboard variables would be removed on deploy).');
+}
+
 if (problems.length) {
   console.error("✗ Not ready to deploy:\n  - " + problems.join("\n  - "));
   process.exit(1);
 }
-console.log(`✓ Deploy config OK (site URL ${url})`);
-console.log("  Reminder: Worker secrets must exist: GOOGLE_SHEETS_SPREADSHEET_ID, GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL, GOOGLE_SHEETS_PRIVATE_KEY (check with: npx wrangler secret list)");
+console.log(`✓ Deploy config OK (Worker ${wrangler.name}, site URL ${url})`);
+console.log(`  Reminder: these must exist on ${PRODUCTION_WORKER} (secrets or dashboard runtime variables): GOOGLE_SHEETS_SPREADSHEET_ID, GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL, GOOGLE_SHEETS_PRIVATE_KEY, AUCTION_ADMINS, AUCTION_SESSION_SECRET (check: npx wrangler secret list --name ${PRODUCTION_WORKER}).`);
+console.log("  Reminder: apply auction migrations before deploying: npx wrangler d1 migrations apply AUCTION_DB --remote");

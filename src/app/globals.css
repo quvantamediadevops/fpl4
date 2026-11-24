@@ -95,17 +95,41 @@
 
 /* Player presentation (/player-presentation): a full-viewport broadcast screen.
    While it is on the page, the site chrome is removed so it owns the whole display. */
-body:has([data-presentation]) > header,
-body:has([data-presentation]) .pb-safe-nav > footer,
-body:has([data-presentation]) nav[aria-label="Quick navigation"] {
+/* Auction screens (/auction/*) use [data-standalone]: same chrome removal, but the page can scroll. */
+body:is(:has([data-presentation]), :has([data-standalone])) > header,
+body:is(:has([data-presentation]), :has([data-standalone])) .pb-safe-nav > footer,
+body:is(:has([data-presentation]), :has([data-standalone])) nav[aria-label="Quick navigation"] {
   display: none;
 }
-body:has([data-presentation]) .pb-safe-nav {
+body:is(:has([data-presentation]), :has([data-standalone])) .pb-safe-nav {
   padding-bottom: 0;
 }
-body:has([data-presentation]) {
+body:is(:has([data-presentation]), :has([data-standalone])) {
   background: #05070d;
+}
+body:has([data-presentation]) {
   overflow: hidden;
+}
+
+/* Auction control room buttons and headings. */
+@layer components {
+  .btn-gold,
+  .btn-ghost,
+  .btn-danger {
+    @apply inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-extrabold tracking-wide transition-[background-color,border-color,box-shadow,color,opacity] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-gold {
+    @apply bg-gold text-[#111827] shadow-[0_8px_30px_-10px_rgb(212_167_44/0.8)] enabled:hover:bg-gold-light;
+  }
+  .btn-ghost {
+    @apply border border-white/15 bg-white/[0.04] text-white/90 enabled:hover:border-gold/60 enabled:hover:text-white;
+  }
+  .btn-danger {
+    @apply bg-red-500 px-5 text-white enabled:hover:bg-red-400;
+  }
+  .section-title {
+    @apply text-xs font-extrabold tracking-[0.24em] text-gold-light;
+  }
 }
 
 /* Angled gold photo frame: top-left and bottom-right corners cut at 45°. */

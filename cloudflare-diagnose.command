@@ -2,7 +2,7 @@
 # FPL Season 4 — READ-ONLY production diagnosis. Changes nothing, deploys nothing.
 # Prints no secret values (secret NAMES only). Output: .cloudflare-diagnose.log
 cd "$(dirname "$0")" || exit 1
-LOG=".cloudflare-diagnose.log"; W="fpl-season-4"; : > "$LOG"
+LOG=".cloudflare-diagnose.log"; W="fpl4"; : > "$LOG"
 log() { echo "$1" | tee -a "$LOG"; }
 echo "=== FPL production diagnosis (read-only) ==="
 
