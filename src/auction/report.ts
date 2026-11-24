@@ -14,7 +14,7 @@ function csvCell(value: string | number): string {
 export function auctionCsv(s: AuctionSnapshot, detail?: AuctionAdminDetail): string {
   const rows: (string | number)[][] = [["Team", "Slot", "Player", "Type", "Price (INR)"]];
   for (const t of s.teams) {
-    rows.push([t.name, "ICON", t.icon?.name ?? "", "Icon (pre-assigned)", 0]);
+    rows.push([t.name, "ICON", t.icon?.name ?? "", "Icon (pre-assigned)", ""]);
     t.players.forEach((p, i) => rows.push([t.name, i + 1, p.name, p.role ? ROLE[p.role] ?? p.role : "", p.price]));
     rows.push([t.name, "TOTAL SPENT", "", "", t.spent]);
     rows.push([t.name, "REMAINING", "", "", t.remaining]);

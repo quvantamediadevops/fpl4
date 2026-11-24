@@ -119,7 +119,7 @@ const regRaja = s.players.find((p) => p.name.toLowerCase() === "raja");
 const regAyush = s.players.find((p) => p.name.toLowerCase() === "ayush");
 assert.ok(regRaja && regAyush, "registered Raja and Ayush are in the pool");
 assert.ok(s.teams.every((t) => t.purchased === 0 && t.spent === 0 && t.remaining === 4000), "icons cost nothing");
-ok(`pool loaded from registrations: ${s.counts.pool} players (incl. registered Raja & Ayush), 8 icons pre-assigned at ₹0`);
+ok(`pool loaded from registrations: ${s.counts.pool} players (incl. registered Raja & Ayush), 8 icons pre-assigned`);
 
 const live = liveSocket();
 await live.opened;

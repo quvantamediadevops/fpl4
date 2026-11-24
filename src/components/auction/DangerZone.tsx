@@ -240,7 +240,7 @@ function ResetDialog({
                   `${s.teams.length} teams`,
                   `${inr(s.rules.teamBudget)} per team`,
                   `${s.rules.playersPerTeam} auction purchases per team`,
-                  `${icons} ICONs at ₹0`,
+                  `${icons} ICONs pre-assigned`,
                   `${s.counts.pool} players available`,
                   "No active sales",
                   "No correction history",

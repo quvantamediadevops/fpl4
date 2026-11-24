@@ -40,7 +40,7 @@ function SquadsLine({ s }: { s: AuctionSnapshot }) {
   return (
     <p className="text-[clamp(0.62rem,0.7vw,0.85rem)] font-bold tracking-[0.2em] text-white/55">
       <b className="text-white">{s.counts.sold}</b> / {s.counts.pool} PLAYERS SOLD · <b className="text-gold-light">{inr(s.counts.spent)}</b> SPENT · SLOTS{" "}
-      <b className="text-white">{s.counts.filledSlots}</b> / {s.counts.totalSlots} · ICONS PRE-ASSIGNED AT ₹0
+      <b className="text-white">{s.counts.filledSlots}</b> / {s.counts.totalSlots} · ICONS PRE-ASSIGNED
     </p>
   );
 }
@@ -93,7 +93,6 @@ function TeamPanel({ team, index, playersPerTeam, changes }: { team: AuctionTeam
           </span>
           <IconPhoto teamId={team.id} name={team.icon?.name} className="size-[clamp(1.25rem,2.3vh,1.65rem)]" />
           <span className="min-w-0 truncate font-display text-[clamp(0.9rem,1.02vw,1.25rem)] font-bold uppercase">{team.icon?.name ?? "—"}</span>
-          <span className="ml-auto shrink-0 text-[clamp(0.48rem,0.52vw,0.64rem)] font-bold tracking-[0.12em] text-gold-light/70">₹0</span>
         </span>
         <span className="shrink-0 text-right leading-none">
           <span className="block font-display text-[clamp(1rem,1.2vw,1.45rem)] font-extrabold tabular-nums">
