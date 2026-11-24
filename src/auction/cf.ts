@@ -32,15 +32,34 @@ export interface DurableObjectNamespace {
   get(id: DurableObjectId): DurableObjectStub;
 }
 
+export interface SqlStorageCursor<T> {
+  toArray(): T[];
+}
+
+/** SQLite storage private to the Durable Object (SQLite-backed class). */
+export interface SqlStorage {
+  exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): SqlStorageCursor<T>;
+}
+
+export interface DurableObjectStorage {
+  sql: SqlStorage;
+  transactionSync<T>(fn: () => T): T;
+}
+
 export interface DurableObjectState {
   acceptWebSocket(ws: WebSocket, tags?: string[]): void;
   getWebSockets(tag?: string): WebSocket[];
+  storage: DurableObjectStorage;
 }
 
 export interface AuctionEnv {
   AUCTION_DB: D1Database;
   AUCTION_ROOM: DurableObjectNamespace;
   PLAYER_PHOTOS?: string;
+  /** Admin names allowed to HARD RESET the auction. Unset or empty: nobody. */
+  AUCTION_SUPER_ADMINS?: string;
+  /** Local fault injection for reset tests ("backup" | "database"). Ignored unless the request is LOCAL. */
+  AUCTION_RESET_FAULT?: string;
 }
 
 /** Name of the single AuctionRoom Durable Object instance (not the Worker name). All season commands go through it. */

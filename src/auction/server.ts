@@ -1,7 +1,8 @@
 import "server-only";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { AUCTION_ROOM_NAME, type AuctionEnv } from "./cf";
-import type { AuctionAdminDetail, AuctionCommand, AuctionSnapshot, CommandResult } from "./types";
+import type { ResetEnvironment, ResetInfo } from "./reset";
+import type { AuctionAdminDetail, AuctionCommand, AuctionSnapshot, CommandResult, ResetRequest } from "./types";
 
 /** Auction bindings, or null where they are not configured (e.g. plain `next start`). */
 export function auctionEnv(): AuctionEnv | null {
@@ -36,4 +37,26 @@ export async function runCommand(env: AuctionEnv, adminId: string, command: Auct
     body: JSON.stringify({ adminId, command }),
   });
   return (await res.json()) as CommandResult;
+}
+
+/** HARD RESET (super-admin only; the caller has already checked session, origin, CSRF and confirmation). */
+export async function runReset(env: AuctionEnv, adminId: string, reset: ResetRequest): Promise<CommandResult> {
+  const res = await room(env).fetch("https://auction-room/reset", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ adminId, reset }),
+  });
+  return (await res.json()) as CommandResult;
+}
+
+export async function fetchResetInfo(env: AuctionEnv, environment: ResetEnvironment): Promise<ResetInfo> {
+  const res = await room(env).fetch(`https://auction-room/reset-info?environment=${environment}`);
+  if (!res.ok) throw new Error(`reset info ${res.status}`);
+  return (await res.json()) as ResetInfo;
+}
+
+/** A stored backup's JSON, or null. Super-admin only (checked by the caller). */
+export async function fetchResetBackup(env: AuctionEnv, id: string): Promise<string | null> {
+  const res = await room(env).fetch(`https://auction-room/reset-backup?id=${encodeURIComponent(id)}`);
+  return res.ok ? res.text() : null;
 }

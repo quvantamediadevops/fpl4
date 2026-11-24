@@ -16,7 +16,10 @@ import type { PlayerRole } from "../types/player";
 import type { AuctionEnv, D1Database, D1PreparedStatement, DurableObjectState } from "./cf";
 import {
   checkCompletion,
+  checkCorrection,
   checkSale,
+  correctionAction,
+  correctionLedger,
   checkStart,
   describeRejection,
   describeTransition,
@@ -26,19 +29,51 @@ import {
   type AuctionRules,
   type AuctionStatus,
   type CompletionInput,
+  validReason,
 } from "./rules";
-import type { AuctionAdminDetail, AuctionCommand, AuctionEventView, AuctionSnapshot, AuctionTeamView, CommandResult } from "./types";
+import {
+  BACKUP_ID,
+  REQUEST_ID,
+  RESET_BACKUPS_KEPT,
+  RESET_COOLDOWN_MS,
+  RESET_MAX_PER_HOUR,
+  phraseMatches,
+  superAdminNames,
+  type ResetBackupInfo,
+  type ResetEnvironment,
+  type ResetInfo,
+  type ResetOutcome,
+} from "./reset";
+import type { AuctionAdminDetail, AuctionCommand, AuctionEventView, AuctionSnapshot, AuctionTeamView, CommandResult, CorrectionKind, ResetRequest } from "./types";
 
 declare const WebSocketPair: { new (): { 0: WebSocket; 1: WebSocket } };
 
 const MAX_SOCKETS = 400;
 const RATE_WINDOW_MS = 10_000;
 const RATE_LIMIT = 40; // commands per admin per window (a person needs far fewer)
-const PRESENTER_EVENTS = ["PLAYER_SELECTED", "PLAYER_SOLD", "PLAYER_UNSOLD", "SALE_REVERSED", "AUCTION_STARTED", "AUCTION_PAUSED", "AUCTION_RESUMED", "AUCTION_COMPLETED"];
+const PRESENTER_EVENTS = [
+  "PLAYER_SELECTED",
+  "PLAYER_SOLD",
+  "PLAYER_UNSOLD",
+  "SALE_REVERSED",
+  "SALE_CORRECTED",
+  "PLAYER_REOPENED",
+  "AUCTION_STARTED",
+  "AUCTION_PAUSED",
+  "AUCTION_RESUMED",
+  "AUCTION_COMPLETED",
+];
+const KEY = /^[A-Za-z0-9-]{16,64}$/;
 
 const now = () => new Date().toISOString();
 const str = (v: unknown) => (typeof v === "string" ? v : v == null ? null : String(v));
 const num = (v: unknown) => (typeof v === "number" ? v : Number(v ?? 0));
+const MAINTENANCE = { ok: false, code: "MAINTENANCE", message: "The auction is being reset. Wait a moment, then reload." } as const;
+
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 class CommandError extends Error {
   constructor(
@@ -67,6 +102,8 @@ export class AuctionRoom {
   private snapshot: AuctionSnapshot | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private rate = new Map<string, number[]>();
+  /** Set from the moment a reset is accepted until it has finished: every other command is refused, not queued. */
+  private resetting = false;
 
   constructor(
     private readonly state: DurableObjectState,
@@ -97,8 +134,29 @@ export class AuctionRoom {
         case "/command": {
           if (request.method !== "POST") return new Response(null, { status: 405 });
           const { adminId, command } = (await request.json()) as { adminId: string; command: AuctionCommand };
+          if (this.resetting) return Response.json(MAINTENANCE, { status: 409 });
           const result = await this.serial(() => this.execute(adminId, command));
           return Response.json(result, { status: result.ok ? 200 : 409 });
+        }
+        case "/reset": {
+          if (request.method !== "POST") return new Response(null, { status: 405 });
+          const { adminId, reset } = (await request.json()) as { adminId: string; reset: ResetRequest };
+          // Checked and set synchronously after the body is read: a second reset arriving while one runs is refused.
+          if (this.resetting) return Response.json({ ok: false, code: "RESET_IN_PROGRESS", message: "A reset is already running. Wait for it to finish." }, { status: 409 });
+          this.resetting = true;
+          try {
+            const result = await this.serial(() => this.reset(adminId, reset));
+            return Response.json(result, { status: result.ok ? 200 : 409 });
+          } finally {
+            this.resetting = false;
+          }
+        }
+        case "/reset-info":
+          return Response.json(await this.resetInfo(url.searchParams.get("environment") === "LOCAL" ? "LOCAL" : "PRODUCTION"));
+        case "/reset-backup": {
+          const id = url.searchParams.get("id") ?? "";
+          const text = BACKUP_ID.test(id) ? this.readBackup(id) : null;
+          return text === null ? new Response(null, { status: 404 }) : new Response(text, { headers: { "Content-Type": "application/json; charset=utf-8" } });
         }
         default:
           return new Response(null, { status: 404 });
@@ -138,8 +196,8 @@ export class AuctionRoom {
 
   async webSocketError() {}
 
-  private broadcast(snapshot: AuctionSnapshot) {
-    const message = JSON.stringify({ type: "state", snapshot });
+  private broadcast(snapshot: AuctionSnapshot, type: "state" | "reset" = "state") {
+    const message = JSON.stringify({ type, snapshot });
     for (const ws of this.state.getWebSockets()) {
       try {
         ws.send(message);
@@ -161,7 +219,7 @@ export class AuctionRoom {
   }
 
   private async buildSnapshot(): Promise<AuctionSnapshot> {
-    const [settingsR, teamsR, iconsR, playersR, ledgerR, recentR, eventR] = await this.db.batch([
+    const [settingsR, teamsR, iconsR, playersR, ledgerR, recentR, eventR, resetR] = await this.db.batch([
       this.db.prepare("SELECT * FROM auction_settings WHERE id = 1"),
       this.db.prepare("SELECT id, team_name, initial_budget, sort_order FROM auction_teams ORDER BY sort_order"),
       this.db.prepare("SELECT team_id, icon_name FROM auction_icons"),
@@ -171,6 +229,7 @@ export class AuctionRoom {
       this.db
         .prepare(`SELECT event_id, event_type, player_id, team_id, amount, timestamp FROM auction_events WHERE event_type IN (${PRESENTER_EVENTS.map(() => "?").join(",")}) ORDER BY event_id DESC LIMIT 1`)
         .bind(...PRESENTER_EVENTS),
+      this.db.prepare("SELECT COUNT(*) AS n FROM auction_admin_audit WHERE action = 'AUCTION_RESET' AND phase = 'COMPLETED'"),
     ]);
 
     const s = settingsR?.results[0];
@@ -260,13 +319,15 @@ export class AuctionRoom {
         totalSlots: teams.length * rules.playersPerTeam,
       },
       updatedAt: String(s.updated_at),
+      resetEpoch: num(resetR?.results[0]?.n),
     };
   }
 
   private async adminDetail(): Promise<AuctionAdminDetail> {
-    const [eventsR, salesR] = await this.db.batch([
-      this.db.prepare("SELECT * FROM auction_events ORDER BY event_id DESC LIMIT 80"),
+    const [eventsR, salesR, correctionsR] = await this.db.batch([
+      this.db.prepare("SELECT * FROM auction_events ORDER BY event_id DESC LIMIT 120"),
       this.db.prepare("SELECT * FROM auction_sales ORDER BY confirmed_at DESC, rowid DESC"),
+      this.db.prepare("SELECT * FROM auction_corrections ORDER BY created_at DESC, rowid DESC"),
     ]);
     return {
       events: (eventsR?.results ?? []).map((e) => ({
@@ -290,7 +351,71 @@ export class AuctionRoom {
         reversedBy: str(r.reversed_by),
         reversalReason: str(r.reversal_reason),
       })),
+      corrections: (correctionsR?.results ?? []).map((c) => ({
+        id: String(c.id),
+        action: String(c.action) as CorrectionKind,
+        playerId: String(c.player_id),
+        originalSaleId: str(c.original_sale_id),
+        replacementSaleId: str(c.replacement_sale_id),
+        fromTeamId: str(c.from_team_id),
+        toTeamId: str(c.to_team_id),
+        fromPrice: c.from_price == null ? null : num(c.from_price),
+        toPrice: c.to_price == null ? null : num(c.to_price),
+        reason: String(c.reason),
+        adminId: String(c.admin_id),
+        at: String(c.created_at),
+      })),
     };
+  }
+
+  /** A correction with this key already ran: same request → report its outcome; different request → refuse. */
+  private async priorCorrection(key: string, expect: { action: CorrectionKind[]; playerId?: string; saleId?: string; teamId?: string; price?: number }) {
+    const prior = await this.db.prepare("SELECT * FROM auction_corrections WHERE idempotency_key = ?1").bind(key).first();
+    if (!prior) return null;
+    const same =
+      expect.action.includes(String(prior.action) as CorrectionKind) &&
+      (expect.playerId === undefined || prior.player_id === expect.playerId) &&
+      (expect.saleId === undefined || prior.original_sale_id === expect.saleId) &&
+      (expect.teamId === undefined || prior.to_team_id === expect.teamId) &&
+      (expect.price === undefined || num(prior.to_price) === expect.price);
+    if (!same) throw new CommandError("IDEMPOTENCY_CONFLICT", "This confirmation was already used for a different correction. Reload and try again.");
+    return { saleId: str(prior.replacement_sale_id) ?? str(prior.original_sale_id) ?? undefined, duplicate: true };
+  }
+
+  private correctionRow(fields: {
+    action: CorrectionKind;
+    playerId: string;
+    originalSaleId?: string | null;
+    replacementSaleId?: string | null;
+    fromTeamId?: string | null;
+    toTeamId?: string | null;
+    fromPrice?: number | null;
+    toPrice?: number | null;
+    reason: string;
+    adminId: string;
+    at: string;
+    key: string;
+  }) {
+    return this.db
+      .prepare(
+        `INSERT INTO auction_corrections (id, action, player_id, original_sale_id, replacement_sale_id, from_team_id, to_team_id, from_price, to_price, reason, admin_id, created_at, idempotency_key)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        fields.action,
+        fields.playerId,
+        fields.originalSaleId ?? null,
+        fields.replacementSaleId ?? null,
+        fields.fromTeamId ?? null,
+        fields.toTeamId ?? null,
+        fields.fromPrice ?? null,
+        fields.toPrice ?? null,
+        fields.reason,
+        fields.adminId,
+        fields.at,
+        fields.key,
+      );
   }
 
   // ---- Commands -----------------------------------------------------------
@@ -321,6 +446,202 @@ export class AuctionRoom {
       }
       throw error;
     }
+  }
+
+  // ---- HARD RESET ----------------------------------------------------------
+  //
+  // Order (all inside the command queue, with every other command refused meanwhile):
+  //   1. validate (super-admin, exact phrase, acknowledgement, request id, cooldown, hourly cap)
+  //   2. audit STARTED
+  //   3. verified backup of every auction table into this object's private SQLite storage
+  //      (read back and checked by SHA-256 and row counts); any failure aborts before anything is deleted
+  //   4. ONE D1 batch (a single transaction): guard row, delete corrections -> sales -> events
+  //      (foreign-key order), players back to AVAILABLE, settings back to NOT_STARTED,
+  //      guard row removed, audit COMPLETED. Either all of it commits or none of it does.
+  //   5. rebuild the snapshot from D1 and broadcast AUCTION_RESET to every screen
+  // Teams, icons, the player pool, rules, sessions, login throttling and migrations are not touched.
+  // The version keeps increasing (screens ignore older versions), and event ids continue.
+
+  private isSuperAdmin(adminId: string) {
+    return superAdminNames(this.env.AUCTION_SUPER_ADMINS).has(adminId.toLowerCase());
+  }
+
+  private async databaseRef(): Promise<string> {
+    const row = await this.db.prepare("SELECT created_at FROM auction_settings WHERE id = 1").first<{ created_at: string }>();
+    return `AUCTION_DB#${(await sha256Hex(`fpl-auction|${row?.created_at ?? ""}`)).slice(0, 12)}`;
+  }
+
+  private audit(phase: "STARTED" | "COMPLETED" | "FAILED", f: { requestId: string; adminId: string; environment: ResetEnvironment; database: string; at: string; backup?: ResetBackupInfo | null; detail?: unknown }) {
+    return this.db
+      .prepare(
+        `INSERT INTO auction_admin_audit (request_id, action, phase, admin_id, environment, database_ref, backup_ref, backup_sha256, backup_bytes, detail, created_at)
+         VALUES (?1, 'AUCTION_RESET', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
+      )
+      .bind(f.requestId, phase, f.adminId, f.environment, f.database, f.backup?.id ?? null, f.backup?.sha256 ?? null, f.backup?.bytes ?? null, f.detail === undefined ? null : JSON.stringify(f.detail), f.at);
+  }
+
+  private async reset(adminId: string, req: ResetRequest): Promise<CommandResult> {
+    const fail = (code: string, message: string, backup?: ResetBackupInfo): CommandResult => ({ ok: false, code, message, snapshot: this.snapshot ?? undefined, ...(backup ? { backup } : {}) });
+    // Re-checked here (the API route checks too): never trust a single layer for a destructive action.
+    if (!this.isSuperAdmin(adminId)) return fail("FORBIDDEN", "Only a super-admin can reset the auction.");
+    if (req.acknowledged !== true) return fail("CONFIRMATION_REQUIRED", "Tick the confirmation box first.");
+    if (!phraseMatches(req.phrase)) return fail("PHRASE_MISMATCH", "The confirmation phrase does not match exactly.");
+    if (typeof req.requestId !== "string" || !REQUEST_ID.test(req.requestId)) return fail("BAD_REQUEST", "Invalid reset request.");
+    const environment: ResetEnvironment = req.environment === "LOCAL" ? "LOCAL" : "PRODUCTION";
+    if (this.limited(adminId)) return fail("RATE_LIMITED", "Too many actions in a short time. Wait a few seconds.");
+
+    // Idempotency: the same request id never resets twice.
+    const prior = await this.db.prepare("SELECT phase, detail FROM auction_admin_audit WHERE request_id = ?1 ORDER BY id DESC").bind(req.requestId).all<{ phase: string; detail: string | null }>();
+    const done = prior.results.find((r) => r.phase === "COMPLETED");
+    if (done) {
+      this.snapshot = await this.buildSnapshot();
+      return { ok: true, snapshot: this.snapshot, duplicate: true, reset: JSON.parse(done.detail ?? "null") as ResetOutcome };
+    }
+    if (prior.results.length) return fail("DUPLICATE_REQUEST", "This reset request was already used. Start a new reset.");
+
+    const now = Date.now();
+    const recent = await this.db
+      .prepare("SELECT MAX(created_at) AS last, COUNT(*) AS n FROM auction_admin_audit WHERE action = 'AUCTION_RESET' AND phase = 'STARTED' AND created_at > ?1")
+      .bind(new Date(now - 3_600_000).toISOString())
+      .first<{ last: string | null; n: number }>();
+    if (recent?.last && now - Date.parse(recent.last) < RESET_COOLDOWN_MS) return fail("RESET_COOLDOWN", "A reset was just attempted. Wait a few seconds before trying again.");
+    if (num(recent?.n) >= RESET_MAX_PER_HOUR) return fail("RATE_LIMITED", "Too many reset attempts in the last hour.");
+
+    const database = await this.databaseRef();
+    const startedAt = new Date().toISOString();
+    const base = { requestId: req.requestId, adminId, environment, database };
+    await this.audit("STARTED", { ...base, at: startedAt }).run();
+    console.log(`[auction] RESET STARTED request=${req.requestId} admin=${adminId} env=${environment} db=${database}`);
+    const fault = environment === "LOCAL" ? this.env.AUCTION_RESET_FAULT : undefined;
+
+    let backup: ResetBackupInfo;
+    try {
+      backup = await this.createVerifiedBackup({ requestId: req.requestId, adminId, environment, database, at: startedAt, fault });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.audit("FAILED", { ...base, at: new Date().toISOString(), detail: { stage: "backup", error: message } }).run().catch(() => {});
+      console.error(`[auction] RESET ABORTED (backup) request=${req.requestId}: ${message}`);
+      return fail("BACKUP_FAILED", "The backup could not be created and verified, so nothing was reset. The auction is unchanged.");
+    }
+
+    const completedAt = new Date().toISOString();
+    const outcome: ResetOutcome = { requestId: req.requestId, completedAt, backup };
+    const db = this.db;
+    const statements = [
+      db.prepare("INSERT INTO auction_reset_guard (id, request_id) VALUES (1, ?1)").bind(req.requestId),
+      db.prepare("DELETE FROM auction_corrections"),
+      db.prepare("DELETE FROM auction_sales"),
+      db.prepare("DELETE FROM auction_events"),
+      db.prepare("UPDATE auction_players SET status = 'AVAILABLE', winning_team_id = NULL, sold_price = NULL, sold_at = NULL, unsold_count = 0"),
+      db.prepare("UPDATE auction_settings SET status = 'NOT_STARTED', current_player_id = NULL, version = version + 1, updated_at = ?1 WHERE id = 1").bind(completedAt),
+      // Local test only: a statement that fails after the deletes, to prove the whole batch rolls back.
+      ...(fault === "database" ? [db.prepare("INSERT INTO auction_reset_guard (id, request_id) VALUES (1, ?1)").bind(req.requestId)] : []),
+      db.prepare("DELETE FROM auction_reset_guard"),
+      this.audit("COMPLETED", { ...base, at: completedAt, backup, detail: outcome }),
+    ];
+    try {
+      await db.batch(statements);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.audit("FAILED", { ...base, at: new Date().toISOString(), backup, detail: { stage: "database", error: message } }).run().catch(() => {});
+      this.snapshot = await this.buildSnapshot().catch(() => null);
+      console.error(`[auction] RESET FAILED (database, rolled back) request=${req.requestId}: ${message}`);
+      return fail("RESET_FAILED", `The database rejected the reset, so nothing was changed (the transaction was rolled back). Backup ${backup.id} is kept.`, backup);
+    }
+
+    this.snapshot = await this.buildSnapshot();
+    this.broadcast(this.snapshot, "reset");
+    console.log(`[auction] RESET COMPLETED request=${req.requestId} admin=${adminId} env=${environment} db=${database} backup=${backup.id}`);
+    return { ok: true, snapshot: this.snapshot, reset: outcome };
+  }
+
+  // ---- Backups (private Durable Object storage; never served publicly) -------
+
+  private backupTables() {
+    const sql = this.state.storage.sql;
+    sql.exec(`CREATE TABLE IF NOT EXISTS reset_backups (
+      id TEXT PRIMARY KEY, created_at TEXT NOT NULL, request_id TEXT NOT NULL, admin_id TEXT NOT NULL,
+      environment TEXT NOT NULL, database_ref TEXT NOT NULL, bytes INTEGER NOT NULL, sha256 TEXT NOT NULL,
+      rows TEXT NOT NULL, chunks INTEGER NOT NULL)`);
+    sql.exec("CREATE TABLE IF NOT EXISTS reset_backup_chunks (backup_id TEXT NOT NULL, n INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (backup_id, n))");
+    return sql;
+  }
+
+  private async createVerifiedBackup(f: { requestId: string; adminId: string; environment: ResetEnvironment; database: string; at: string; fault?: string }): Promise<ResetBackupInfo> {
+    const tables = ["auction_settings", "auction_teams", "auction_icons", "auction_players", "auction_sales", "auction_events", "auction_corrections"] as const;
+    // One batch = one consistent read; nothing else can write meanwhile (we hold the command queue).
+    const results = await this.db.batch([
+      ...tables.map((t) => this.db.prepare(`SELECT * FROM ${t} ORDER BY rowid`)),
+      this.db.prepare("SELECT name, applied_at FROM d1_migrations ORDER BY id"),
+    ]);
+    const data: Record<string, unknown[]> = {};
+    const rows: Record<string, number> = {};
+    tables.forEach((t, i) => {
+      data[t] = results[i]?.results ?? [];
+      rows[t] = data[t].length;
+    });
+    const json = JSON.stringify({
+      format: "fpl-auction-backup/1",
+      createdAt: f.at,
+      requestId: f.requestId,
+      adminId: f.adminId,
+      environment: f.environment,
+      database: f.database,
+      migrations: results[tables.length]?.results ?? [],
+      tables: data,
+    });
+    const sha256 = await sha256Hex(json);
+    const bytes = new TextEncoder().encode(json).length;
+    const id = `bk-${f.at.replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z")}-${sha256.slice(0, 8)}`;
+    const CHUNK = 400_000; // characters; well under the 2 MB row limit
+    const parts: string[] = [];
+    for (let i = 0; i < json.length; i += CHUNK) parts.push(json.slice(i, i + CHUNK));
+
+    const sql = this.backupTables();
+    this.state.storage.transactionSync(() => {
+      sql.exec(
+        "INSERT INTO reset_backups (id, created_at, request_id, admin_id, environment, database_ref, bytes, sha256, rows, chunks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        id, f.at, f.requestId, f.adminId, f.environment, f.database, bytes, sha256, JSON.stringify(rows), parts.length,
+      );
+      parts.forEach((p, n) => sql.exec("INSERT INTO reset_backup_chunks (backup_id, n, data) VALUES (?, ?, ?)", id, n, p));
+    });
+
+    // Verify by reading it back: same hash, parses, same row counts.
+    const restored = this.readBackup(id);
+    if (f.fault === "backup") throw new Error("injected backup fault (local test)");
+    if (restored === null || (await sha256Hex(restored)) !== sha256) throw new Error("backup verification failed: checksum mismatch");
+    const parsed = JSON.parse(restored) as { tables: Record<string, unknown[]> };
+    for (const t of tables) if ((parsed.tables[t]?.length ?? -1) !== rows[t]) throw new Error(`backup verification failed: ${t} row count`);
+
+    // Keep the newest backups only.
+    sql.exec(`DELETE FROM reset_backup_chunks WHERE backup_id IN (SELECT id FROM reset_backups ORDER BY created_at DESC LIMIT -1 OFFSET ${RESET_BACKUPS_KEPT})`);
+    sql.exec(`DELETE FROM reset_backups WHERE id IN (SELECT id FROM reset_backups ORDER BY created_at DESC LIMIT -1 OFFSET ${RESET_BACKUPS_KEPT})`);
+
+    return { id, createdAt: f.at, bytes, sha256, rows, environment: f.environment, database: f.database, restorePoint: f.at };
+  }
+
+  private readBackup(id: string): string | null {
+    const sql = this.backupTables();
+    const meta = sql.exec<{ chunks: number }>("SELECT chunks FROM reset_backups WHERE id = ?", id).toArray()[0];
+    if (!meta) return null;
+    const parts = sql.exec<{ data: string }>("SELECT data FROM reset_backup_chunks WHERE backup_id = ? ORDER BY n", id).toArray();
+    return parts.length === Number(meta.chunks) ? parts.map((p) => p.data).join("") : null;
+  }
+
+  private async resetInfo(environment: ResetEnvironment): Promise<ResetInfo> {
+    const last = await this.db
+      .prepare("SELECT created_at, admin_id, request_id, backup_ref FROM auction_admin_audit WHERE action = 'AUCTION_RESET' AND phase = 'COMPLETED' ORDER BY id DESC LIMIT 1")
+      .first<{ created_at: string; admin_id: string; request_id: string; backup_ref: string | null }>();
+    const backups = this.backupTables()
+      .exec<{ id: string; created_at: string; bytes: number; sha256: string }>("SELECT id, created_at, bytes, sha256 FROM reset_backups ORDER BY created_at DESC LIMIT 5")
+      .toArray()
+      .map((b) => ({ id: b.id, createdAt: b.created_at, bytes: num(b.bytes), sha256: b.sha256 }));
+    return {
+      environment,
+      database: await this.databaseRef(),
+      lastReset: last ? { at: last.created_at, adminId: last.admin_id, requestId: last.request_id, backupRef: last.backup_ref } : null,
+      backups,
+    };
   }
 
   private event(type: string, adminId: string, at: string, fields: { playerId?: string | null; teamId?: string | null; amount?: number | null; metadata?: Record<string, unknown> } = {}) {
@@ -490,13 +811,86 @@ export class AuctionRoom {
         return {};
       }
 
-      case "reverse": {
-        const reason = typeof cmd.reason === "string" ? cmd.reason.trim() : "";
-        if (reason.length < 5 || reason.length > 300) throw new CommandError("REASON_REQUIRED", "Give a reason for the correction (5–300 characters).");
-        if (snap.status !== "ACTIVE" && snap.status !== "PAUSED") throw new CommandError("INVALID_TRANSITION", "Sales can only be corrected while the auction is running or paused.");
+      case "correct": {
+        const key = typeof cmd.idempotencyKey === "string" ? cmd.idempotencyKey.trim() : "";
+        if (!KEY.test(key)) throw new CommandError("BAD_REQUEST", "Missing request key. Reload the page and try again.");
+        const prior = await this.priorCorrection(key, { action: ["CHANGE_PRICE", "CHANGE_TEAM", "CHANGE_PRICE_TEAM"], saleId: cmd.saleId, teamId: cmd.teamId, price: cmd.price });
+        if (prior) return prior;
+        if (!validReason(cmd.reason)) throw new CommandError("REASON_REQUIRED", "Give a reason for the correction (5–300 characters).");
+        const reason = cmd.reason.trim();
+
         const sale = await db.prepare("SELECT id, player_id, team_id, sold_price, reversed_at FROM auction_sales WHERE id = ?1").bind(cmd.saleId).first();
         if (!sale) throw new CommandError("SALE_NOT_FOUND", "That sale does not exist.");
-        if (sale.reversed_at) throw new CommandError("ALREADY_REVERSED", "That sale has already been reversed.");
+        const from = { teamId: String(sale.team_id), price: num(sale.sold_price) };
+        const target = snap.teams.find((t) => t.id === cmd.teamId) ?? null;
+        const input = {
+          rules: snap.rules,
+          status: snap.status,
+          sale: { ...from, active: !sale.reversed_at },
+          target: target ? { id: target.id, initialBudget: target.initialBudget, spent: target.spent, purchased: target.purchased } : null,
+          price: cmd.price,
+        };
+        const rejection = checkCorrection(input);
+        if (rejection) {
+          const ledger = correctionLedger(input);
+          throw new CommandError(rejection, describeRejection(rejection, snap.rules, ledger ? teamPosition(snap.rules, ledger) : undefined));
+        }
+        const action = correctionAction(from, { teamId: cmd.teamId, price: cmd.price });
+        if (!action) throw new CommandError("NO_CHANGE", "Change the team, the price or both.");
+
+        const playerId = String(sale.player_id);
+        const newSaleId = crypto.randomUUID();
+        // Target team's live sales, not counting the sale being replaced.
+        const others = (col: string) => `(SELECT ${col} FROM auction_sales WHERE team_id = ?3 AND reversed_at IS NULL AND id <> ?1)`;
+        await db.batch([
+          guard(
+            db,
+            `${S("status")} IN ('ACTIVE','PAUSED')
+             AND EXISTS (SELECT 1 FROM auction_sales s JOIN auction_players p ON p.player_id = s.player_id
+                         WHERE s.id = ?1 AND s.player_id = ?2 AND s.reversed_at IS NULL AND s.team_id = ?5 AND s.sold_price = ?6
+                           AND p.status = 'SOLD' AND p.winning_team_id = s.team_id)
+             AND EXISTS (SELECT 1 FROM auction_teams WHERE id = ?3)
+             AND ?4 = CAST(?4 AS INTEGER)
+             AND ?4 >= ${S("minimum_bid")} AND ?4 <= ${S("maximum_bid")}
+             AND ${others("COUNT(*)")} < ${S("players_per_team")}
+             AND ?4 <= (SELECT initial_budget FROM auction_teams WHERE id = ?3) - ${others("COALESCE(SUM(sold_price), 0)")}
+                       - (${S("players_per_team")} - 1 - ${others("COUNT(*)")}) * ${S("minimum_bid")}`,
+            cmd.saleId,
+            playerId,
+            cmd.teamId,
+            cmd.price,
+            from.teamId,
+            from.price,
+          ),
+          db.prepare("UPDATE auction_sales SET reversed_at = ?2, reversed_by = ?3, reversal_reason = ?4 WHERE id = ?1").bind(cmd.saleId, at, adminId, `Corrected: ${reason}`),
+          db
+            .prepare("INSERT INTO auction_sales (id, player_id, team_id, sold_price, confirmed_at, admin_id, idempotency_key) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)")
+            .bind(newSaleId, playerId, cmd.teamId, cmd.price, at, adminId, `correction-${key}`),
+          db.prepare("UPDATE auction_players SET status = 'SOLD', winning_team_id = ?2, sold_price = ?3, sold_at = ?4 WHERE player_id = ?1").bind(playerId, cmd.teamId, cmd.price, at),
+          this.correctionRow({ action, playerId, originalSaleId: cmd.saleId, replacementSaleId: newSaleId, fromTeamId: from.teamId, toTeamId: cmd.teamId, fromPrice: from.price, toPrice: cmd.price, reason, adminId, at, key }),
+          this.event("SALE_CORRECTED", adminId, at, {
+            playerId,
+            teamId: cmd.teamId,
+            amount: cmd.price,
+            metadata: { action, originalSaleId: cmd.saleId, newSaleId, fromTeamId: from.teamId, fromPrice: from.price, reason },
+          }),
+          this.bump(at),
+        ]);
+        return { saleId: newSaleId };
+      }
+
+      case "undo": {
+        const key = typeof cmd.idempotencyKey === "string" ? cmd.idempotencyKey.trim() : "";
+        if (!KEY.test(key)) throw new CommandError("BAD_REQUEST", "Missing request key. Reload the page and try again.");
+        const prior = await this.priorCorrection(key, { action: ["UNDO_SALE"], saleId: cmd.saleId });
+        if (prior) return prior;
+        if (!validReason(cmd.reason)) throw new CommandError("REASON_REQUIRED", "Give a reason for undoing the sale (5–300 characters).");
+        const reason = cmd.reason.trim();
+        if (snap.status !== "ACTIVE" && snap.status !== "PAUSED") throw new CommandError("AUCTION_CLOSED", describeRejection("AUCTION_CLOSED", snap.rules));
+        const sale = await db.prepare("SELECT id, player_id, team_id, sold_price, reversed_at FROM auction_sales WHERE id = ?1").bind(cmd.saleId).first();
+        if (!sale) throw new CommandError("SALE_NOT_FOUND", "That sale does not exist.");
+        if (sale.reversed_at) throw new CommandError("SALE_NOT_ACTIVE", describeRejection("SALE_NOT_ACTIVE", snap.rules));
+        const playerId = String(sale.player_id);
         await db.batch([
           guard(
             db,
@@ -505,16 +899,34 @@ export class AuctionRoom {
                          WHERE s.id = ?1 AND s.reversed_at IS NULL AND p.status = 'SOLD' AND p.winning_team_id = s.team_id)`,
             cmd.saleId,
           ),
-          db.prepare("UPDATE auction_sales SET reversed_at = ?2, reversed_by = ?3, reversal_reason = ?4 WHERE id = ?1").bind(cmd.saleId, at, adminId, reason),
-          db
-            .prepare(
-              "UPDATE auction_players SET status = CASE WHEN unsold_count > 0 THEN 'UNSOLD' ELSE 'AVAILABLE' END, winning_team_id = NULL, sold_price = NULL, sold_at = NULL WHERE player_id = ?1",
-            )
-            .bind(String(sale.player_id)),
-          this.event("SALE_REVERSED", adminId, at, { playerId: String(sale.player_id), teamId: String(sale.team_id), amount: num(sale.sold_price), metadata: { saleId: cmd.saleId, reason } }),
+          db.prepare("UPDATE auction_sales SET reversed_at = ?2, reversed_by = ?3, reversal_reason = ?4 WHERE id = ?1").bind(cmd.saleId, at, adminId, `Undone: ${reason}`),
+          db.prepare("UPDATE auction_players SET status = 'UNSOLD', winning_team_id = NULL, sold_price = NULL, sold_at = NULL WHERE player_id = ?1").bind(playerId),
+          this.correctionRow({ action: "UNDO_SALE", playerId, originalSaleId: cmd.saleId, fromTeamId: String(sale.team_id), fromPrice: num(sale.sold_price), reason, adminId, at, key }),
+          this.event("SALE_REVERSED", adminId, at, { playerId, teamId: String(sale.team_id), amount: num(sale.sold_price), metadata: { action: "UNDO_SALE", saleId: cmd.saleId, reason } }),
           this.bump(at),
         ]);
         return { saleId: cmd.saleId };
+      }
+
+      case "reopen": {
+        const key = typeof cmd.idempotencyKey === "string" ? cmd.idempotencyKey.trim() : "";
+        if (!KEY.test(key)) throw new CommandError("BAD_REQUEST", "Missing request key. Reload the page and try again.");
+        const prior = await this.priorCorrection(key, { action: ["REOPEN_PLAYER"], playerId: cmd.playerId });
+        if (prior) return prior;
+        if (!validReason(cmd.reason)) throw new CommandError("REASON_REQUIRED", "Give a reason for reopening the player (5–300 characters).");
+        const reason = cmd.reason.trim();
+        if (snap.status !== "ACTIVE" && snap.status !== "PAUSED") throw new CommandError("AUCTION_CLOSED", describeRejection("AUCTION_CLOSED", snap.rules));
+        const player = snap.players.find((p) => p.id === cmd.playerId);
+        if (!player) throw new CommandError("PLAYER_NOT_FOUND", describeRejection("PLAYER_NOT_FOUND", snap.rules));
+        if (player.status !== "UNSOLD") throw new CommandError("PLAYER_NOT_UNSOLD", "Only an UNSOLD player can be returned to AVAILABLE.");
+        await db.batch([
+          guard(db, `${S("status")} IN ('ACTIVE','PAUSED') AND EXISTS (SELECT 1 FROM auction_players WHERE player_id = ?1 AND status = 'UNSOLD')`, cmd.playerId),
+          db.prepare("UPDATE auction_players SET status = 'AVAILABLE' WHERE player_id = ?1").bind(cmd.playerId),
+          this.correctionRow({ action: "REOPEN_PLAYER", playerId: cmd.playerId, reason, adminId, at, key }),
+          this.event("PLAYER_REOPENED", adminId, at, { playerId: cmd.playerId, metadata: { reason, unsoldRounds: player.unsoldCount } }),
+          this.bump(at),
+        ]);
+        return {};
       }
     }
   }

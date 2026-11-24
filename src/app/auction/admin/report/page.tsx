@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import { getAdminSession } from "@/auction/auth";
+import { CORRECTION_LABEL, SALE_STATE_LABEL, saleHistory } from "@/auction/history";
 import { formatInr, roleLabel } from "@/auction/report";
-import { auctionEnv, fetchSnapshot } from "@/auction/server";
+import { auctionEnv, fetchAdminDetail, fetchSnapshot } from "@/auction/server";
 import { PrintButton } from "@/components/auction/PrintButton";
 
 export const metadata: Metadata = { title: "Auction Report", robots: { index: false, follow: false } };
@@ -12,7 +13,10 @@ export default async function AuctionReportPage() {
   await connection(); // always rendered per request: live data and the admin session
   const env = auctionEnv();
   if (!env || !(await getAdminSession(env).catch(() => null))) redirect("/auction/admin");
-  const s = await fetchSnapshot(env);
+  const [s, detail] = await Promise.all([fetchSnapshot(env), fetchAdminDetail(env)]);
+  const history = saleHistory(detail).slice().reverse();
+  const playerName = (id: string) => s.players.find((p) => p.id === id)?.name ?? id;
+  const teamName = (id: string | null) => (id ? s.teams.find((t) => t.id === id)?.name ?? id : "");
   const unsold = s.players.filter((p) => p.status !== "SOLD");
 
   return (
@@ -76,6 +80,48 @@ export default async function AuctionReportPage() {
           </section>
         ))}
       </main>
+
+      <section className="mx-auto mt-8 max-w-5xl">
+        <h2 className="text-lg font-black">Sale history {history.length ? `(${history.length})` : ""}</h2>
+        <p className="text-sm text-muted">Every sale ever recorded, oldest first. Reversed sales stay on record; a corrected sale replaces the reversed one.</p>
+        {history.length ? (
+          <table className="mt-3 w-full text-sm">
+            <thead>
+              <tr className="border-b border-line text-left text-[11px] tracking-wider text-muted">
+                <th className="py-1 pr-2">Time (IST)</th>
+                <th className="py-1 pr-2">Player</th>
+                <th className="py-1 pr-2">Team</th>
+                <th className="py-1 pr-2 text-right">Price</th>
+                <th className="py-1 pr-2">Kind</th>
+                <th className="py-1">Status / correction</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((h) => (
+                <tr key={h.saleId} className={`border-b border-line/60 align-top ${h.reversedAt ? "text-muted" : ""}`}>
+                  <td className="py-1 pr-2 tabular-nums">{new Date(h.at).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}</td>
+                  <td className="py-1 pr-2 font-semibold uppercase">{playerName(h.playerId)}</td>
+                  <td className="py-1 pr-2">{teamName(h.teamId)}</td>
+                  <td className="py-1 pr-2 text-right tabular-nums">{formatInr(h.price)}</td>
+                  <td className="py-1 pr-2">{h.origin === "CORRECTION" ? "Corrected sale" : "Original sale"}</td>
+                  <td className="py-1">
+                    <b>{SALE_STATE_LABEL[h.state]}</b>
+                    {h.endedBy && (
+                      <span className="block text-xs">
+                        {CORRECTION_LABEL[h.endedBy.action]}
+                        {h.endedBy.toTeamId ? ` → ${teamName(h.endedBy.toTeamId)} ${formatInr(h.endedBy.toPrice ?? 0)}` : ""} · {h.endedBy.adminId}: “{h.endedBy.reason}”
+                      </span>
+                    )}
+                    {!h.endedBy && h.reversedAt && <span className="block text-xs">{h.reversedBy}: “{h.reversalReason}”</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="mt-1 text-sm text-muted">No sales yet.</p>
+        )}
+      </section>
 
       <section className="mx-auto mt-6 max-w-5xl break-inside-avoid">
         <h2 className="text-lg font-black">Not sold {unsold.length ? `(${unsold.length})` : ""}</h2>

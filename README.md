@@ -227,7 +227,7 @@ Before the first push: `git init`, then confirm `git status` does not list `.env
 
 ## 8. Player auction (physical auction system)
 
-Routes: `/auction/admin` (control room, sign-in required), `/auction/presenter` (big screen, public, read-only), `/auction/teams` (public squads). All are `noindex, nofollow`.
+Routes: `/auction/admin` (control room, sign-in required) and three public, read-only broadcast screens: `/player-presentation` (player on the block, recent purchases, icons, budgets), `/team-squads` (all eight squads live) and `/auction-summary` (totals, top buys, franchise spending). On a broadcast screen press **1**, **2**, **3** to switch screens and **F** for fullscreen; the screens share one live connection, so switching keeps fullscreen. `/auction/presenter` and `/auction/teams` redirect to the new screens. The pre-auction registration slideshow is at `/player-introductions`. All are `noindex, nofollow`.
 
 **How it works**
 - Teams bid in the room; the admin records the result. There is no online bidding.
@@ -235,6 +235,8 @@ Routes: `/auction/admin` (control room, sign-in required), `/auction/presenter` 
 - Each sale is one D1 transaction. The database itself refuses a second live sale of a player, a reused confirmation, and any change or deletion of sales or audit events.
 - Rules are stored in the database (`auction_settings`): budget ₹4,000, 11 auction players per team plus the pre-assigned icon (12 in total), any whole-rupee price from ₹100 to ₹3,000. The maximum price for a team's next player is `min(3000, remaining − 100 × slots left after this one)`.
 - Icon players come from `src/config/tournament.ts` (`icon`). They are separate people from the registrations (a registered player with the same name stays in the auction), are pre-assigned to their team and cost nothing.
+
+**Migrations:** `0001_auction.sql` (schema), `0002_auction_corrections.sql` (corrections ledger; widens the audit event types — the events table is rebuilt with every row kept) and `0003_auction_reset.sql` (hard reset: append-only `auction_admin_audit`, and delete triggers that allow clearing history only inside an audited reset transaction). Apply new migrations to production with `npx wrangler d1 migrations apply AUCTION_DB --remote` **before** pushing code that needs them.
 
 **One-time production setup on Worker `fpl4` (needs approval; not done yet)**
 1. `npx wrangler d1 create fpl-auction --location apac` and paste its `database_id` into `wrangler.jsonc` (`AUCTION_DB`, replacing the placeholder).
@@ -244,14 +246,26 @@ Routes: `/auction/admin` (control room, sign-in required), `/auction/presenter` 
 
 **On the day**
 1. Sign in at `/auction/admin`, press **Load pool from registrations** (copies the current registrations; must be exactly 8 × 11 = 88), check the icons, then **Start auction**.
-2. Open `/auction/presenter` on the big screen and press **Fullscreen**.
+2. Open `/player-presentation` on the big screen and press **F** (fullscreen). Switch to the squads (**2**) or summary (**3**) at any time.
 3. Per player: select → physical bidding → choose the winning team and price → **Confirm sold** (or **Mark unsold**; unsold players can be selected again later).
-4. Mistakes: **Correct** in the sales ledger, with a reason. The original sale is kept and marked reversed.
+4. Mistakes: **Correct / Undo** on the sale under **Recent Sales** (or in **Auction History & Corrections**), with a mandatory reason:
+   - **Correct Price**, **Change Team** or **Correct Price & Team**: the original sale is reversed and a corrected sale recorded in one transaction; budgets and squads are recalculated from live sales.
+   - **Undo Sale → Mark UNSOLD**: the sale is reversed and the player becomes UNSOLD (sellable again later).
+   - **Reopen** an UNSOLD player to return them to AVAILABLE.
+   - Nothing is ever deleted: reversed sales, corrections (`auction_corrections`) and audit events stay on record and appear in both reports.
 5. **Complete** only succeeds when all 88 are sold and every team has 11. Then download the CSV or print the team report.
+
+**Hard reset (super-admins only)** — for clearing a demonstration auction before the real one.
+- Enable it by listing admin names in the Worker variable `AUCTION_SUPER_ADMINS` (comma-separated, e.g. `deepti`). Unset or empty means nobody can reset; other admins never see the **Danger Zone**.
+- Control room → **Danger Zone** (bottom) → **Hard reset auction** → read stage 1 → tick the acknowledgement and type `RESET FPL SEASON 4 AUCTION` exactly → **Permanently reset auction**. The Danger Zone states which database it acts on (LOCAL PREVIEW or PRODUCTION).
+- What happens: every other admin action is refused while it runs; a full backup of the auction tables is written to the auction server's private storage and verified (SHA-256 + row counts) — if that fails nothing is reset; then one D1 transaction deletes corrections, sales and audit events, returns every player to AVAILABLE and the auction to NOT_STARTED. Teams, owners, logos, ICONs, the player pool, rules, admin accounts, sessions and migrations are kept. All screens update live.
+- Every attempt is recorded in `auction_admin_audit` (STARTED / COMPLETED / FAILED, admin, time, database, backup id) and that record is never cleared.
+- Recovery: the success screen links the backup (JSON, super-admin only, `/api/auction/admin/reset-backups/<id>`). In production, D1 Time Travel can also restore the whole database to the moment before the reset: `npx wrangler d1 time-travel restore fpl-auction --timestamp=<backup time>` (this overwrites the database; check `npx wrangler d1 time-travel info fpl-auction --timestamp=…` first).
+- The reset is never run automatically (not by deploys or migrations). Local tests: `scripts/auction-reset-smoke.mjs` (refuses non-local URLs).
 
 **Local development**
 - The auction needs the Workers runtime: its Durable Object and live channel are in `worker.ts`, which `next dev` does not load. Under `npm run dev` the auction pages show a notice instead.
-- Run `npm run auction:local`. It applies the migration to the local D1 database (`.wrangler/state`, never `--remote`), builds, and starts the preview at http://localhost:8787 (`/auction/admin`, `/auction/presenter`, `/auction/teams`).
+- Run `npm run auction:local`. It applies the migration to the local D1 database (`.wrangler/state`, never `--remote`), builds, and starts the preview at http://localhost:8787 (`/auction/admin`, `/player-presentation`, `/team-squads`, `/auction-summary`).
 - Test login: put `AUCTION_ADMINS` and `AUCTION_SESSION_SECRET` from `node scripts/auction-admin.mjs local-admin` in `.dev.vars`. That file is gitignored and only used locally.
 
 **Tests**

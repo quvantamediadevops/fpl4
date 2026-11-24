@@ -60,7 +60,10 @@ export type SaleRejection =
   | "PRICE_ABOVE_MAXIMUM"
   | "TEAM_FULL"
   | "INSUFFICIENT_BUDGET"
-  | "RESERVE_VIOLATION";
+  | "RESERVE_VIOLATION"
+  | "AUCTION_CLOSED"
+  | "SALE_NOT_ACTIVE"
+  | "NO_CHANGE";
 
 export interface SaleCheckInput {
   rules: AuctionRules;
@@ -71,23 +74,71 @@ export interface SaleCheckInput {
   price: number;
 }
 
-/** Every rule a sale must pass, in the order an operator would want to hear about them. */
-export function checkSale(input: SaleCheckInput): SaleRejection | null {
-  const { rules, price } = input;
-  if (input.status !== "ACTIVE") return "AUCTION_NOT_ACTIVE";
-  if (!input.player) return "PLAYER_NOT_FOUND";
-  if (input.player.status === "SOLD") return "PLAYER_ALREADY_SOLD";
-  if (input.currentPlayerId !== input.player.id) return "PLAYER_NOT_SELECTED";
-  if (!input.team) return "TEAM_NOT_FOUND";
+/** Price and team-budget rules shared by new sales and corrections. */
+export function checkPurchase(rules: AuctionRules, team: TeamLedger | null, price: number): SaleRejection | null {
+  if (!team) return "TEAM_NOT_FOUND";
   if (!Number.isSafeInteger(price)) return "PRICE_NOT_WHOLE";
   if (price < rules.minimumBid) return "PRICE_BELOW_MINIMUM";
   if (price > rules.maximumBid) return "PRICE_ABOVE_MAXIMUM";
-  const pos = teamPosition(rules, input.team);
+  const pos = teamPosition(rules, team);
   if (pos.slotsLeft <= 0) return "TEAM_FULL";
   if (price > pos.remaining) return "INSUFFICIENT_BUDGET";
   if (price > pos.remaining - Math.max(0, pos.slotsLeft - 1) * rules.minimumBid) return "RESERVE_VIOLATION";
   return null;
 }
+
+/** Every rule a sale must pass, in the order an operator would want to hear about them. */
+export function checkSale(input: SaleCheckInput): SaleRejection | null {
+  if (input.status !== "ACTIVE") return "AUCTION_NOT_ACTIVE";
+  if (!input.player) return "PLAYER_NOT_FOUND";
+  if (input.player.status === "SOLD") return "PLAYER_ALREADY_SOLD";
+  if (input.currentPlayerId !== input.player.id) return "PLAYER_NOT_SELECTED";
+  return checkPurchase(input.rules, input.team, input.price);
+}
+
+export interface CorrectionCheckInput {
+  rules: AuctionRules;
+  status: AuctionStatus;
+  /** The live sale being corrected. */
+  sale: { teamId: string; price: number; active: boolean } | null;
+  /** Corrected team's live ledger (before the correction). */
+  target: (TeamLedger & { id: string }) | null;
+  price: number;
+}
+
+/**
+ * The target team's position once the original sale is taken back. A correction
+ * within the same team frees that sale's money and slot first.
+ */
+export function correctionLedger(input: Pick<CorrectionCheckInput, "sale" | "target">): TeamLedger | null {
+  const { sale, target } = input;
+  if (!target) return null;
+  return sale && sale.teamId === target.id
+    ? { initialBudget: target.initialBudget, spent: target.spent - sale.price, purchased: target.purchased - 1 }
+    : { initialBudget: target.initialBudget, spent: target.spent, purchased: target.purchased };
+}
+
+/** Rules for replacing a live sale with a corrected one (team and/or price). */
+export function checkCorrection(input: CorrectionCheckInput): SaleRejection | null {
+  if (input.status !== "ACTIVE" && input.status !== "PAUSED") return "AUCTION_CLOSED";
+  if (!input.sale || !input.sale.active) return "SALE_NOT_ACTIVE";
+  if (!input.target) return "TEAM_NOT_FOUND";
+  if (input.target.id === input.sale.teamId && input.price === input.sale.price) return "NO_CHANGE";
+  return checkPurchase(input.rules, correctionLedger(input), input.price);
+}
+
+export type CorrectionAction = "CHANGE_PRICE" | "CHANGE_TEAM" | "CHANGE_PRICE_TEAM";
+
+export function correctionAction(from: { teamId: string; price: number }, to: { teamId: string; price: number }): CorrectionAction | null {
+  const team = from.teamId !== to.teamId;
+  const price = from.price !== to.price;
+  return team && price ? "CHANGE_PRICE_TEAM" : team ? "CHANGE_TEAM" : price ? "CHANGE_PRICE" : null;
+}
+
+export const REASON_MIN = 5;
+export const REASON_MAX = 300;
+export const validReason = (reason: unknown): reason is string =>
+  typeof reason === "string" && reason.trim().length >= REASON_MIN && reason.trim().length <= REASON_MAX;
 
 export function describeRejection(r: SaleRejection, rules: AuctionRules, pos?: TeamPosition): string {
   const inr = formatInr;
@@ -112,6 +163,12 @@ export function describeRejection(r: SaleRejection, rules: AuctionRules, pos?: T
       return `This team already has ${rules.playersPerTeam} auction players.`;
     case "INSUFFICIENT_BUDGET":
       return pos ? `This team has only ${inr(pos.remaining)} left; the most it can pay now is ${inr(pos.maxNextPrice)}.` : "This team does not have enough budget.";
+    case "AUCTION_CLOSED":
+      return "Corrections are only possible while the auction is running or paused.";
+    case "SALE_NOT_ACTIVE":
+      return "That sale has already been corrected or undone. Correct the current sale instead.";
+    case "NO_CHANGE":
+      return "Change the team, the price or both.";
     case "RESERVE_VIOLATION":
       return pos
         ? `This team can pay at most ${inr(pos.maxNextPrice)}: it must keep ${inr(Math.max(0, pos.slotsLeft - 1) * rules.minimumBid)} for its other ${Math.max(0, pos.slotsLeft - 1)} open slots.`

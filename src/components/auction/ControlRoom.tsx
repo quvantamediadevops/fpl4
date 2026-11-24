@@ -1,14 +1,18 @@
 "use client";
 
 import { AnimatePresence } from "motion/react";
-import { Download, ExternalLink, Gavel, LogOut, Pause, Play, Printer, RefreshCw, Search, Trophy, Undo2, UserX, Users } from "lucide-react";
+import { Download, ExternalLink, Gavel, LogOut, Pause, Pencil, Play, Printer, RefreshCw, RotateCcw, Search, Trophy, UserX, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { checkSale, describeRejection, teamPosition } from "@/auction/rules";
+import { CORRECTION_LABEL, SALE_STATE_LABEL, saleHistory, type SaleState } from "@/auction/history";
+import { checkSale, describeRejection, teamPosition, validReason } from "@/auction/rules";
 import type { AuctionAdminDetail, AuctionPlayerView, AuctionSnapshot, AuctionTeamView, CommandResult } from "@/auction/types";
 import { Emblem } from "@/components/layout/Logo";
 import { PlayerPhoto } from "@/components/players/PlayerPhoto";
 import { cn, normalizeForSearch } from "@/lib/utils";
 import { ConnectionPill, StatusPill, TeamLogo, inr, roleText } from "./bits";
+import type { ResetInfo } from "@/auction/reset";
+import { CorrectionDialog, type CorrectableSale } from "./CorrectionDialog";
+import { DangerZone } from "./DangerZone";
 import { Modal } from "./Modal";
 import { TeamBudgetCard } from "./TeamBudgetCard";
 import { useAuctionLive } from "./useAuctionLive";
@@ -17,13 +21,14 @@ type Notice = { kind: "ok" | "error"; text: string } | null;
 type Dialog =
   | { kind: "sell"; player: AuctionPlayerView; team: AuctionTeamView; price: number; key: string }
   | { kind: "unsold"; player: AuctionPlayerView }
-  | { kind: "reverse"; saleId: string; playerName: string; teamName: string; price: number }
+  | { kind: "correct"; sale: CorrectableSale }
+  | { kind: "reopen"; player: AuctionPlayerView; key: string }
   | { kind: "status"; action: "start" | "pause" | "resume" | "complete" | "loadPool" }
   | null;
 
 const STATUS_FILTERS = ["ALL", "AVAILABLE", "UNSOLD", "SOLD"] as const;
 
-export function ControlRoom({ initial, adminId, csrf }: { initial: AuctionSnapshot; adminId: string; csrf: string }) {
+export function ControlRoom({ initial, adminId, csrf, danger }: { initial: AuctionSnapshot; adminId: string; csrf: string; danger: ResetInfo | null }) {
   const { snapshot, connection, apply } = useAuctionLive(initial);
   const s = snapshot ?? initial;
   const [notice, setNotice] = useState<Notice>(null);
@@ -100,8 +105,11 @@ export function ControlRoom({ initial, adminId, csrf }: { initial: AuctionSnapsh
           <ConnectionPill connection={connection} />
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <StatusControls status={s.status} busy={busy} onAction={(action) => setDialog({ kind: "status", action })} />
-            <a href="/auction/presenter" target="_blank" rel="noopener" className="btn-ghost">
+            <a href="/player-presentation" target="_blank" rel="noopener" className="btn-ghost" title="Public screens: 1 Players · 2 Squads · 3 Summary">
               <ExternalLink className="size-4" aria-hidden="true" /> Presenter
+            </a>
+            <a href="/team-squads" target="_blank" rel="noopener" className="btn-ghost hidden md:inline-flex">
+              <Users className="size-4" aria-hidden="true" /> Squads
             </a>
             <span className="hidden text-xs text-white/50 md:inline">
               Signed in as <b className="text-white/80">{adminId}</b>
@@ -112,6 +120,7 @@ export function ControlRoom({ initial, adminId, csrf }: { initial: AuctionSnapsh
             </button>
           </div>
         </div>
+        <SectionNav />
       </header>
 
       <main className="mx-auto max-w-[1800px] space-y-5 px-4 py-5 lg:px-6">
@@ -138,22 +147,34 @@ export function ControlRoom({ initial, adminId, csrf }: { initial: AuctionSnapsh
         {s.status === "COMPLETED" && <p className="rounded-xl border border-gold/50 bg-gold/10 px-4 py-3 text-sm font-semibold text-gold-light">Auction completed. Download the final report below.</p>}
 
         <div className="grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
-          <PlayerSelector s={s} teams={teams} disabled={!active || busy} onSelect={(id) => send({ type: "select", playerId: id }, "Player sent to the presenter screen.")} />
-          <SalePanel
-            s={s}
-            current={current}
-            teams={teams}
-            disabled={!active || busy}
-            onSell={(team, price) => current && setDialog({ kind: "sell", player: current, team, price, key: crypto.randomUUID() })}
-            onUnsold={() => current && setDialog({ kind: "unsold", player: current })}
-            onNext={() => {
-              const next = s.players.find((p) => p.status === "AVAILABLE") ?? s.players.find((p) => p.status === "UNSOLD");
-              if (next) void send({ type: "select", playerId: next.id }, "Next player sent to the presenter screen.");
-            }}
-          />
+          <div id="select-player" className="min-w-0 scroll-mt-14">
+            <PlayerSelector s={s} teams={teams} disabled={!active || busy} onSelect={(id) => send({ type: "select", playerId: id }, "Player sent to the presenter screen.")} />
+          </div>
+          <div id="auction" className="min-w-0 scroll-mt-14">
+            <SalePanel
+              s={s}
+              current={current}
+              teams={teams}
+              disabled={!active || busy}
+              onSell={(team, price) => current && setDialog({ kind: "sell", player: current, team, price, key: crypto.randomUUID() })}
+              onUnsold={() => current && setDialog({ kind: "unsold", player: current })}
+              onNext={() => {
+                const next = s.players.find((p) => p.status === "AVAILABLE") ?? s.players.find((p) => p.status === "UNSOLD");
+                if (next) void send({ type: "select", playerId: next.id }, "Next player sent to the presenter screen.");
+              }}
+            />
+          </div>
         </div>
 
-        <section aria-labelledby="teams-heading">
+        <RecentSales
+          s={s}
+          players={players}
+          teams={teams}
+          canCorrect={(s.status === "ACTIVE" || s.status === "PAUSED") && !busy}
+          onCorrect={(sale) => setDialog({ kind: "correct", sale })}
+        />
+
+        <section id="team-budgets" aria-labelledby="teams-heading" className="scroll-mt-14">
           <h2 id="teams-heading" className="section-title">TEAM BUDGETS</h2>
           <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {s.teams.map((t) => (
@@ -162,20 +183,18 @@ export function ControlRoom({ initial, adminId, csrf }: { initial: AuctionSnapsh
           </div>
         </section>
 
-        <div className="grid gap-5 xl:grid-cols-2">
-          <SalesLedger
-            detail={detail}
-            players={players}
-            teams={teams}
-            canCorrect={(s.status === "ACTIVE" || s.status === "PAUSED") && !busy}
-            onReverse={(sale) =>
-              setDialog({ kind: "reverse", saleId: sale.saleId, playerName: players.get(sale.playerId)?.name ?? sale.playerId, teamName: teams.get(sale.teamId)?.name ?? sale.teamId, price: sale.price })
-            }
-          />
-          <ActivityLog detail={detail} players={players} teams={teams} />
-        </div>
+        <CorrectionsPanel
+          s={s}
+          detail={detail}
+          players={players}
+          teams={teams}
+          canCorrect={(s.status === "ACTIVE" || s.status === "PAUSED") && !busy}
+          onCorrect={(sale) => setDialog({ kind: "correct", sale })}
+          onReopen={(player) => setDialog({ kind: "reopen", player, key: crypto.randomUUID() })}
+        />
+        <ActivityLog detail={detail} players={players} teams={teams} />
 
-        <section aria-labelledby="reports-heading" className="rounded-2xl border border-white/10 bg-[#0b1222]/80 p-4">
+        <section id="reports" aria-labelledby="reports-heading" className="scroll-mt-14 rounded-2xl border border-white/10 bg-[#0b1222]/80 p-4">
           <h2 id="reports-heading" className="section-title">REPORTS {s.status !== "COMPLETED" && <span className="text-white/40">· PROVISIONAL UNTIL COMPLETED</span>}</h2>
           <div className="mt-3 flex flex-wrap gap-2">
             <a href="/api/auction/admin/report" className="btn-ghost">
@@ -184,15 +203,33 @@ export function ControlRoom({ initial, adminId, csrf }: { initial: AuctionSnapsh
             <a href="/auction/admin/report" target="_blank" rel="noopener" className="btn-ghost">
               <Printer className="size-4" aria-hidden="true" /> Printable team report
             </a>
-            <a href="/auction/teams" target="_blank" rel="noopener" className="btn-ghost">
-              <Users className="size-4" aria-hidden="true" /> Public team overview
+            <a href="/team-squads" target="_blank" rel="noopener" className="btn-ghost">
+              <Users className="size-4" aria-hidden="true" /> Team Squads Live
+            </a>
+            <a href="/auction-summary" target="_blank" rel="noopener" className="btn-ghost">
+              <Trophy className="size-4" aria-hidden="true" /> Auction summary
             </a>
           </div>
         </section>
+
+        {/* Super-admins only, deliberately last and apart from every auction control. */}
+        {danger && <DangerZone info={danger} s={s} csrf={csrf} onApply={apply} />}
       </main>
 
       <AnimatePresence>
-        {dialog && (
+        {dialog?.kind === "correct" && (
+          <CorrectionDialog
+            key={dialog.sale.saleId}
+            s={s}
+            sale={dialog.sale}
+            player={players.get(dialog.sale.playerId)}
+            teams={teams}
+            busy={busy}
+            onSubmit={send}
+            onClose={() => setDialog(null)}
+          />
+        )}
+        {dialog && dialog.kind !== "correct" && (
           <ConfirmDialog
             key={dialog.kind}
             dialog={dialog}
@@ -209,18 +246,121 @@ export function ControlRoom({ initial, adminId, csrf }: { initial: AuctionSnapsh
                 );
               } else if (dialog.kind === "unsold") {
                 result = await send({ type: "unsold", playerId: dialog.player.id }, `${dialog.player.name} marked UNSOLD. They stay eligible for a later round.`);
-              } else if (dialog.kind === "reverse") {
-                result = await send({ type: "reverse", saleId: dialog.saleId, reason: extra ?? "" }, `Sale reversed: ${dialog.playerName}. Budget and slot restored.`);
+              } else if (dialog.kind === "reopen") {
+                result = await send(
+                  { type: "reopen", playerId: dialog.player.id, reason: extra ?? "", idempotencyKey: dialog.key },
+                  `${dialog.player.name} is AVAILABLE again and can be auctioned.`,
+                );
               } else {
                 const labels = { start: "Auction started.", pause: "Auction paused.", resume: "Auction resumed.", complete: "Auction completed.", loadPool: "Player pool loaded from registrations." };
                 result = await send({ type: dialog.action }, labels[dialog.action]);
               }
-              if (result?.ok || dialog.kind !== "reverse") setDialog(null);
+              if (result?.ok || dialog.kind !== "reopen") setDialog(null);
             }}
           />
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+const SECTIONS = [
+  ["select-player", "SELECT PLAYER"],
+  ["auction", "AUCTION"],
+  ["recent-sales", "RECENT SALES"],
+  ["team-budgets", "TEAM BUDGETS"],
+  ["history", "HISTORY & CORRECTIONS"],
+  ["reports", "REPORTS"],
+] as const;
+
+/** Jump bar for the long control room; highlights the section in view. */
+function SectionNav() {
+  const [active, setActive] = useState<string>(SECTIONS[0][0]);
+  useEffect(() => {
+    const els = SECTIONS.map(([id]) => document.getElementById(id)).filter((e): e is HTMLElement => e !== null);
+    const io = new IntersectionObserver(
+      (entries) => {
+        const hit = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        if (hit) setActive(hit.target.id);
+      },
+      { rootMargin: "-25% 0px -65% 0px" },
+    );
+    els.forEach((e) => io.observe(e));
+    return () => io.disconnect();
+  }, []);
+  return (
+    <nav aria-label="Control room sections" className="no-scrollbar mx-auto flex max-w-[1800px] gap-1 overflow-x-auto px-4 pb-2 lg:px-6">
+      {SECTIONS.map(([id, label]) => (
+        <a
+          key={id}
+          href={`#${id}`}
+          aria-current={active === id ? "location" : undefined}
+          className={cn(
+            "shrink-0 rounded-lg px-3 py-1.5 text-[11px] font-extrabold tracking-[0.16em] transition-colors",
+            active === id ? "bg-gold/15 text-gold-light ring-1 ring-gold/40" : "text-white/55 hover:bg-white/[0.06] hover:text-white",
+          )}
+        >
+          {label}
+        </a>
+      ))}
+    </nav>
+  );
+}
+
+/** Latest live sales with one-click access to Correct / Undo (opens the full correction dialog). */
+function RecentSales({
+  s,
+  players,
+  teams,
+  canCorrect,
+  onCorrect,
+}: {
+  s: AuctionSnapshot;
+  players: Map<string, AuctionPlayerView>;
+  teams: Map<string, AuctionTeamView>;
+  canCorrect: boolean;
+  onCorrect: (sale: CorrectableSale) => void;
+}) {
+  const rows = s.recent.slice(0, 6);
+  return (
+    <section id="recent-sales" aria-labelledby="recent-heading" className="scroll-mt-14 rounded-2xl border border-white/10 bg-[#0b1222]/80 p-4">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 id="recent-heading" className="section-title">RECENT SALES</h2>
+        <p className="text-xs text-white/45">Wrong team or price? Correct / Undo opens the correction dialog; every change stays in the history.</p>
+      </div>
+      {rows.length === 0 ? (
+        <p className="mt-3 text-sm text-white/40">No sales yet.</p>
+      ) : (
+        <ul className="mt-3 grid gap-2 md:grid-cols-2 2xl:grid-cols-3">
+          {rows.map((r) => {
+            const p = players.get(r.playerId);
+            const t = teams.get(r.teamId);
+            return (
+              <li key={r.saleId} className="flex items-center gap-3 rounded-xl bg-white/[0.04] px-3 py-2">
+                <span className="relative size-10 shrink-0 overflow-hidden rounded-lg ring-1 ring-white/10">
+                  <PlayerPhoto src={p?.photo ?? null} name={p?.name ?? r.playerId} sizes="48px" stage />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-bold uppercase">{p?.name ?? r.playerId}</span>
+                  <span className="flex items-center gap-1.5 truncate text-[11px] text-white/55">
+                    {t && <TeamLogo team={t} className="size-4 text-[6px]" />}
+                    {t?.name ?? r.teamId} · <b className="text-gold-light tabular-nums">{inr(r.price)}</b>
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  disabled={!canCorrect}
+                  onClick={() => onCorrect({ saleId: r.saleId, playerId: r.playerId, teamId: r.teamId, price: r.price, at: r.at })}
+                  className="btn-ghost h-9 shrink-0 px-3 text-xs"
+                >
+                  <Pencil className="size-3.5" aria-hidden="true" /> Correct / Undo
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -552,42 +692,165 @@ function Info({ label, value, highlight = false }: { label: string; value: strin
   );
 }
 
-function SalesLedger({
+const STATE_STYLE: Record<SaleState, string> = {
+  ACTIVE: "bg-emerald-400/15 text-emerald-200",
+  ACTIVE_CORRECTED: "bg-gold/20 text-gold-light",
+  CORRECTED: "bg-white/10 text-white/55",
+  UNDONE: "bg-red-500/15 text-red-200",
+  REVERSED: "bg-white/10 text-white/55",
+};
+
+/** Auction History & Corrections: every sale with its correction state, plus unsold players to reopen. */
+function CorrectionsPanel({
+  s,
   detail,
   players,
   teams,
   canCorrect,
-  onReverse,
+  onCorrect,
+  onReopen,
 }: {
+  s: AuctionSnapshot;
   detail: AuctionAdminDetail | null;
   players: Map<string, AuctionPlayerView>;
   teams: Map<string, AuctionTeamView>;
   canCorrect: boolean;
-  onReverse: (sale: AuctionAdminDetail["sales"][number]) => void;
+  onCorrect: (sale: CorrectableSale) => void;
+  onReopen: (player: AuctionPlayerView) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [onlyActive, setOnlyActive] = useState(false);
+  const history = useMemo(() => (detail ? saleHistory(detail) : []), [detail]);
+  const q = normalizeForSearch(query);
+  const rows = history.filter(
+    (h) =>
+      (!onlyActive || h.state === "ACTIVE" || h.state === "ACTIVE_CORRECTED") &&
+      (!q || normalizeForSearch(players.get(h.playerId)?.name ?? "").includes(q) || normalizeForSearch(teams.get(h.teamId)?.name ?? "").includes(q)),
+  );
+  const unsold = s.players.filter((p) => p.status === "UNSOLD");
+  const time = (at: string) => new Date(at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+
   return (
-    <section aria-labelledby="ledger-heading" className="rounded-2xl border border-white/10 bg-[#0b1222]/80 p-4">
-      <h2 id="ledger-heading" className="section-title">SALES LEDGER</h2>
-      <ul className="mt-3 max-h-[420px] space-y-1.5 overflow-y-auto pr-1 text-sm">
-        {!detail?.sales.length && <li className="text-white/40">No sales yet.</li>}
-        {detail?.sales.map((sale) => (
-          <li key={sale.saleId} className={cn("flex items-center gap-3 rounded-xl px-3 py-2", sale.reversedAt ? "bg-white/[0.02] text-white/40" : "bg-white/[0.04]")}>
-            <span className="min-w-0 flex-1">
-              <span className={cn("block truncate font-bold uppercase", sale.reversedAt && "line-through")}>{players.get(sale.playerId)?.name ?? sale.playerId}</span>
-              <span className="block truncate text-[11px] text-white/50">
-                {teams.get(sale.teamId)?.name} · {new Date(sale.at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false })} · by {sale.adminId}
-                {sale.reversedAt && ` · REVERSED by ${sale.reversedBy}: ${sale.reversalReason}`}
-              </span>
-            </span>
-            <span className="font-black tabular-nums">{inr(sale.price)}</span>
-            {!sale.reversedAt && (
-              <button type="button" disabled={!canCorrect} onClick={() => onReverse(sale)} className="btn-ghost h-8 px-2.5 text-xs">
-                <Undo2 className="size-3.5" aria-hidden="true" /> Correct
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
+    <section id="history" aria-labelledby="corrections-heading" className="scroll-mt-14 rounded-2xl border border-white/10 bg-[#0b1222]/80 p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 id="corrections-heading" className="section-title">AUCTION HISTORY &amp; CORRECTIONS</h2>
+        <span className="text-xs text-white/45">
+          {history.filter((h) => h.state === "ACTIVE" || h.state === "ACTIVE_CORRECTED").length} active · {history.filter((h) => h.endedBy || h.state === "REVERSED").length} reversed ·{" "}
+          {detail?.corrections.length ?? 0} corrections
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <label className="flex h-9 items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3 focus-within:border-gold">
+            <Search className="size-4 text-gold" aria-hidden="true" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Player or team" aria-label="Search sales" className="w-36 bg-transparent text-sm outline-none" />
+          </label>
+          <button type="button" aria-pressed={onlyActive} onClick={() => setOnlyActive((v) => !v)} className={cn("rounded-full border px-3 py-1.5 text-[11px] font-bold", onlyActive ? "border-gold bg-gold text-[#111827]" : "border-white/15 text-white/70")}>
+            ACTIVE ONLY
+          </button>
+        </div>
+      </div>
+      {!canCorrect && s.status !== "ACTIVE" && s.status !== "PAUSED" && (
+        <p className="mt-2 text-xs text-white/45">{s.status === "COMPLETED" ? "The auction is completed: no more corrections." : "Corrections open once the auction starts."}</p>
+      )}
+
+      <div className="mt-3 grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="md:overflow-x-auto">
+          <table className="block w-full text-sm md:table md:min-w-[640px]">
+            <thead className="hidden md:table-header-group">
+              <tr className="text-left text-[10px] font-bold tracking-[0.16em] text-white/45">
+                <th className="py-2 pr-2">PLAYER</th>
+                <th className="py-2 pr-2">TEAM</th>
+                <th className="py-2 pr-2 text-right">PRICE</th>
+                <th className="py-2 pr-2">TIME</th>
+                <th className="py-2 pr-2">STATUS</th>
+                <th className="py-2" />
+              </tr>
+            </thead>
+            <tbody className="block md:table-row-group">
+              {!rows.length && (
+                <tr className="block md:table-row">
+                  <td colSpan={6} className="block py-6 text-center text-white/40 md:table-cell">
+                    {history.length ? "No sales match." : "No sales yet."}
+                  </td>
+                </tr>
+              )}
+              {rows.map((h) => {
+                const player = players.get(h.playerId);
+                const team = teams.get(h.teamId);
+                const live = h.state === "ACTIVE" || h.state === "ACTIVE_CORRECTED";
+                return (
+                  <tr key={h.saleId} className={cn("grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 border-t border-white/5 py-3 align-top md:table-row md:py-0", !live && "text-white/45")}>
+                    <td className="md:py-2 md:pr-2">
+                      <span className="flex items-center gap-2">
+                        <span className="relative size-8 shrink-0 overflow-hidden rounded-lg ring-1 ring-white/10">
+                          <PlayerPhoto src={player?.photo ?? null} name={player?.name ?? h.playerId} sizes="40px" stage />
+                        </span>
+                        <span className={cn("font-bold uppercase", !live && "line-through decoration-white/30")}>{player?.name ?? h.playerId}</span>
+                      </span>
+                    </td>
+                    <td className="order-3 md:order-none md:py-2 md:pr-2">
+                      <span className="flex items-center gap-2">
+                        {team && <TeamLogo team={team} className="size-6 text-[8px]" />}
+                        {team?.name ?? h.teamId}
+                      </span>
+                    </td>
+                    <td className="order-2 self-center text-right font-black tabular-nums md:order-none md:py-2 md:pr-2">{inr(h.price)}</td>
+                    <td className="order-4 text-right tabular-nums text-white/55 md:order-none md:py-2 md:pr-2 md:text-left">
+                      {time(h.at)}
+                      <span className="block text-[10px] text-white/35">by {h.adminId}</span>
+                    </td>
+                    <td className="order-5 col-span-2 md:order-none md:py-2 md:pr-2">
+                      <span className={cn("inline-block rounded-full px-2 py-0.5 text-[10px] font-black tracking-wider", STATE_STYLE[h.state])}>{SALE_STATE_LABEL[h.state]}</span>
+                      {h.endedBy && (
+                        <span className="mt-1 block max-w-[260px] text-[11px] text-white/50">
+                          {CORRECTION_LABEL[h.endedBy.action]}
+                          {h.endedBy.toTeamId && ` → ${teams.get(h.endedBy.toTeamId)?.name} ${inr(h.endedBy.toPrice ?? 0)}`} · {h.endedBy.adminId}: “{h.endedBy.reason}”
+                        </span>
+                      )}
+                      {!h.endedBy && h.reversedAt && <span className="mt-1 block max-w-[260px] text-[11px] text-white/50">{h.reversedBy}: “{h.reversalReason}”</span>}
+                      {h.createdBy && (
+                        <span className="mt-1 block text-[11px] text-gold-light/70">
+                          Corrected from {teams.get(h.createdBy.fromTeamId ?? "")?.name} {inr(h.createdBy.fromPrice ?? 0)}
+                        </span>
+                      )}
+                    </td>
+                    <td className={cn("order-6 col-span-2 md:order-none md:py-2 md:text-right", !live && "hidden md:table-cell")}>
+                      {live && (
+                        <button
+                          type="button"
+                          disabled={!canCorrect}
+                          onClick={() => onCorrect({ saleId: h.saleId, playerId: h.playerId, teamId: h.teamId, price: h.price, at: h.at })}
+                          className="btn-ghost h-8 px-2.5 text-xs"
+                        >
+                          <Pencil className="size-3.5" aria-hidden="true" /> Correct / Undo
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="rounded-xl bg-white/[0.03] p-3">
+          <h3 className="text-[11px] font-bold tracking-[0.2em] text-white/50">UNSOLD PLAYERS · {unsold.length}</h3>
+          <p className="mt-1 text-[11px] text-white/40">Unsold players can be selected again at any time. Reopen marks one AVAILABLE again.</p>
+          <ul className="mt-2 max-h-[360px] space-y-1.5 overflow-y-auto pr-1">
+            {!unsold.length && <li className="text-sm text-white/35">None.</li>}
+            {unsold.map((p) => (
+              <li key={p.id} className="flex items-center gap-2 rounded-lg bg-white/[0.04] px-2 py-1.5">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-bold uppercase">{p.name}</span>
+                  <span className="block text-[10px] font-bold tracking-wider text-amber-200/70">UNSOLD{p.unsoldCount > 1 ? ` ×${p.unsoldCount}` : ""}</span>
+                </span>
+                <button type="button" disabled={!canCorrect} onClick={() => onReopen(p)} className="btn-ghost h-8 px-2.5 text-xs">
+                  <RotateCcw className="size-3.5" aria-hidden="true" /> Reopen
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
     </section>
   );
 }
@@ -601,7 +864,9 @@ const EVENT_TEXT: Record<string, string> = {
   PLAYER_SELECTED: "Selected",
   PLAYER_SOLD: "Sold",
   PLAYER_UNSOLD: "Unsold",
-  SALE_REVERSED: "Sale reversed",
+  SALE_REVERSED: "Sale undone",
+  SALE_CORRECTED: "Sale corrected",
+  PLAYER_REOPENED: "Reopened",
 };
 
 function ActivityLog({ detail, players, teams }: { detail: AuctionAdminDetail | null; players: Map<string, AuctionPlayerView>; teams: Map<string, AuctionTeamView> }) {
@@ -628,7 +893,7 @@ function ActivityLog({ detail, players, teams }: { detail: AuctionAdminDetail | 
   );
 }
 
-function ConfirmDialog({ dialog, s, busy, onClose, onConfirm }: { dialog: NonNullable<Dialog>; s: AuctionSnapshot; busy: boolean; onClose: () => void; onConfirm: (extra?: string) => void }) {
+function ConfirmDialog({ dialog, s, busy, onClose, onConfirm }: { dialog: Exclude<NonNullable<Dialog>, { kind: "correct" }>; s: AuctionSnapshot; busy: boolean; onClose: () => void; onConfirm: (extra?: string) => void }) {
   const [reason, setReason] = useState("");
   const submitting = useRef(false);
   const confirm = (extra?: string) => {
@@ -677,28 +942,26 @@ function ConfirmDialog({ dialog, s, busy, onClose, onConfirm }: { dialog: NonNul
       </Modal>
     );
   }
-  if (dialog.kind === "reverse") {
-    const valid = reason.trim().length >= 5;
+  if (dialog.kind === "reopen") {
     return (
-      <Modal title="CORRECT A SALE" onClose={onClose} busy={busy}>
+      <Modal title="REOPEN UNSOLD PLAYER" onClose={onClose} busy={busy}>
         <p className="text-base">
-          Reverse <b className="uppercase">{dialog.playerName}</b> → {dialog.teamName} for <b>{inr(dialog.price)}</b>? The team gets the money and the slot back, the player returns to the pool, and the original sale stays in the
-          ledger marked as reversed.
+          Return <b className="uppercase">{dialog.player.name}</b> to <b>AVAILABLE</b> so the auctioneer can put them up again? Their UNSOLD history stays in the audit log.
         </p>
-        <label htmlFor="reverse-reason" className="mt-4 block text-[11px] font-bold tracking-[0.2em] text-white/50">
+        <label htmlFor="reopen-reason" className="mt-4 block text-[11px] font-bold tracking-[0.2em] text-white/50">
           REASON (REQUIRED)
         </label>
         <textarea
-          id="reverse-reason"
+          id="reopen-reason"
           data-autofocus
           value={reason}
           maxLength={300}
           onChange={(e) => setReason(e.target.value)}
           rows={3}
           className="mt-2 w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm outline-none focus:border-gold"
-          placeholder="e.g. Wrong team entered — anchor confirmed STAR XI"
+          placeholder="e.g. Second round for unsold players"
         />
-        <DialogButtons busy={busy} disabled={!valid} confirmLabel="REVERSE SALE" danger onCancel={onClose} onConfirm={() => confirm(reason)} />
+        <DialogButtons busy={busy} disabled={!validReason(reason)} confirmLabel="REOPEN PLAYER" onCancel={onClose} onConfirm={() => confirm(reason)} />
       </Modal>
     );
   }

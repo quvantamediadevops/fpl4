@@ -5,6 +5,7 @@ import type { AuctionCommand } from "@/auction/types";
 
 const noStore = { "Cache-Control": "no-store" };
 const ID = /^[a-z0-9-]{1,120}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** Accepts only known command shapes; anything else is rejected before reaching the auction room. */
 function parse(body: Record<string, unknown>): AuctionCommand | null {
@@ -27,9 +28,24 @@ function parse(body: Record<string, unknown>): AuctionCommand | null {
         typeof body.idempotencyKey === "string"
         ? { type: "sell", playerId: body.playerId, teamId: body.teamId, price: body.price, idempotencyKey: body.idempotencyKey }
         : null;
-    case "reverse":
-      return typeof body.saleId === "string" && /^[0-9a-f-]{36}$/.test(body.saleId) && typeof body.reason === "string"
-        ? { type: "reverse", saleId: body.saleId, reason: body.reason }
+    case "correct":
+      return typeof body.saleId === "string" &&
+        UUID.test(body.saleId) &&
+        typeof body.teamId === "string" &&
+        ID.test(body.teamId) &&
+        typeof body.price === "number" &&
+        Number.isFinite(body.price) &&
+        typeof body.reason === "string" &&
+        typeof body.idempotencyKey === "string"
+        ? { type: "correct", saleId: body.saleId, teamId: body.teamId, price: body.price, reason: body.reason.slice(0, 1000), idempotencyKey: body.idempotencyKey }
+        : null;
+    case "undo":
+      return typeof body.saleId === "string" && UUID.test(body.saleId) && typeof body.reason === "string" && typeof body.idempotencyKey === "string"
+        ? { type: "undo", saleId: body.saleId, reason: body.reason.slice(0, 1000), idempotencyKey: body.idempotencyKey }
+        : null;
+    case "reopen":
+      return typeof body.playerId === "string" && ID.test(body.playerId) && typeof body.reason === "string" && typeof body.idempotencyKey === "string"
+        ? { type: "reopen", playerId: body.playerId, reason: body.reason.slice(0, 1000), idempotencyKey: body.idempotencyKey }
         : null;
     default:
       return null;

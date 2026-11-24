@@ -1,6 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
 import type { AuctionEnv } from "./cf";
+import { superAdminNames } from "./reset";
 
 /*
  * Admin authentication for the auction control room.
@@ -98,6 +99,12 @@ function admins(): Map<string, Account> {
     }
   }
   return map;
+}
+
+/** Super-admins (may HARD RESET): an existing account that is also listed in AUCTION_SUPER_ADMINS. */
+export function isSuperAdmin(adminId: string): boolean {
+  const name = adminId.toLowerCase();
+  return admins().has(name) && superAdminNames(process.env.AUCTION_SUPER_ADMINS).has(name);
 }
 
 /** Login needs at least one account and a session-signing secret. */

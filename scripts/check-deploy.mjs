@@ -60,6 +60,8 @@ if (wrangler) {
   }
   const dob = (wrangler.durable_objects?.bindings ?? []).some((b) => b.name === "AUCTION_ROOM" && b.class_name === "AuctionRoom");
   if (!dob) problems.push('wrangler.jsonc: Durable Object binding AUCTION_ROOM → AuctionRoom is missing.');
+  // A remote binding would make the local preview (and its HARD RESET) act on the production database.
+  if ((wrangler.d1_databases ?? []).some((d) => d.remote)) problems.push('wrangler.jsonc: a D1 binding has "remote": true. Remove it: local development must never use the production database.');
   if (wrangler.main !== "worker.ts") problems.push('wrangler.jsonc: "main" must be "worker.ts" (it wraps OpenNext and exports AuctionRoom).');
   if (wrangler.keep_vars !== true) problems.push('wrangler.jsonc: "keep_vars": true is missing (dashboard variables would be removed on deploy).');
 }
@@ -69,5 +71,5 @@ if (problems.length) {
   process.exit(1);
 }
 console.log(`✓ Deploy config OK (Worker ${wrangler.name}, site URL ${url})`);
-console.log(`  Reminder: these must exist on ${PRODUCTION_WORKER} (secrets or dashboard runtime variables): GOOGLE_SHEETS_SPREADSHEET_ID, GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL, GOOGLE_SHEETS_PRIVATE_KEY, AUCTION_ADMINS, AUCTION_SESSION_SECRET (check: npx wrangler secret list --name ${PRODUCTION_WORKER}).`);
+console.log(`  Reminder: these must exist on ${PRODUCTION_WORKER} (secrets or dashboard runtime variables): GOOGLE_SHEETS_SPREADSHEET_ID, GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL, GOOGLE_SHEETS_PRIVATE_KEY, AUCTION_ADMINS, AUCTION_SESSION_SECRET, and AUCTION_SUPER_ADMINS for the hard reset (check: npx wrangler secret list --name ${PRODUCTION_WORKER}).`);
 console.log("  Reminder: apply auction migrations before deploying: npx wrangler d1 migrations apply AUCTION_DB --remote");

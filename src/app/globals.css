@@ -10,8 +10,30 @@
   }
 }
 
+/* Broadcast screens: the whole layout fits one display (no scrolling) on desktops and projectors. */
+@custom-variant fit {
+  @media (min-width: 1024px) and (min-height: 640px) {
+    @slot;
+  }
+}
+
+/* Condensed athletic face for broadcast numbers and headlines; loaded only by the broadcast screens.
+   Inline so the font variable resolves on each element (it is defined by the broadcast layout, not :root). */
+@theme inline {
+  --font-display: var(--font-display-face), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+
 @theme {
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --animate-spotlight: spotlight 22s ease-in-out infinite alternate;
+  @keyframes spotlight {
+    0% {
+      transform: translate3d(-7%, 0, 0) rotate(-4deg);
+    }
+    100% {
+      transform: translate3d(7%, -2%, 0) rotate(4deg);
+    }
+  }
 
   --color-ink: #111827;
   --color-muted: #64748b;
@@ -129,6 +151,13 @@ body:has([data-presentation]) {
   }
   .section-title {
     @apply text-xs font-extrabold tracking-[0.24em] text-gold-light;
+  }
+  /* Broadcast glass panel: restrained transparency, hairline border, soft depth. */
+  .bc-panel {
+    @apply relative rounded-2xl border border-white/[0.08] bg-[linear-gradient(180deg,rgb(18_27_50/0.80),rgb(7_11_23/0.86))] shadow-[inset_0_1px_0_rgb(255_255_255/0.06),0_28px_60px_-30px_rgb(0_0_0/0.9)] backdrop-blur-md;
+  }
+  .bc-eyebrow {
+    @apply text-[clamp(0.62rem,0.72vw,0.85rem)] font-extrabold tracking-[0.32em] text-gold-light;
   }
 }
 

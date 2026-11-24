@@ -1,5 +1,6 @@
 import type { AuctionPlayerStatus, AuctionRules, AuctionStatus } from "./rules";
 import type { PlayerRole } from "../types/player";
+import type { ResetBackupInfo, ResetEnvironment, ResetOutcome } from "./reset";
 
 /** Everything a screen needs, built by the server from D1. Public: no admin data. */
 export interface AuctionSnapshot {
@@ -15,6 +16,8 @@ export interface AuctionSnapshot {
   lastEvent: AuctionEventView | null;
   counts: { pool: number; sold: number; available: number; unsold: number; spent: number; combinedRemaining: number; filledSlots: number; totalSlots: number };
   updatedAt: string;
+  /** Number of completed HARD RESETs; changes when the auction is reset so screens drop stale state. */
+  resetEpoch: number;
 }
 
 export interface AuctionTeamView {
@@ -57,17 +60,46 @@ export interface AuctionSaleView {
 
 export interface AuctionEventView {
   id: number;
-  type: "PLAYER_SELECTED" | "PLAYER_SOLD" | "PLAYER_UNSOLD" | "SALE_REVERSED" | "AUCTION_STARTED" | "AUCTION_PAUSED" | "AUCTION_RESUMED" | "AUCTION_COMPLETED" | "POOL_LOADED";
+  type:
+    | "PLAYER_SELECTED"
+    | "PLAYER_SOLD"
+    | "PLAYER_UNSOLD"
+    | "SALE_REVERSED"
+    | "SALE_CORRECTED"
+    | "PLAYER_REOPENED"
+    | "AUCTION_STARTED"
+    | "AUCTION_PAUSED"
+    | "AUCTION_RESUMED"
+    | "AUCTION_COMPLETED"
+    | "POOL_LOADED";
   playerId: string | null;
   teamId: string | null;
   amount: number | null;
   at: string;
 }
 
-/** Admin-only detail: full audit log and every sale including reversed ones. */
+export type CorrectionKind = "CHANGE_PRICE" | "CHANGE_TEAM" | "CHANGE_PRICE_TEAM" | "UNDO_SALE" | "REOPEN_PLAYER";
+
+export interface AuctionCorrectionView {
+  id: string;
+  action: CorrectionKind;
+  playerId: string;
+  originalSaleId: string | null;
+  replacementSaleId: string | null;
+  fromTeamId: string | null;
+  toTeamId: string | null;
+  fromPrice: number | null;
+  toPrice: number | null;
+  reason: string;
+  adminId: string;
+  at: string;
+}
+
+/** Admin-only detail: full audit log, every sale (including reversed ones) and every correction. */
 export interface AuctionAdminDetail {
   events: (AuctionEventView & { adminId: string; metadata: Record<string, unknown> | null })[];
   sales: (AuctionSaleView & { adminId: string; reversedAt: string | null; reversedBy: string | null; reversalReason: string | null })[];
+  corrections: AuctionCorrectionView[];
 }
 
 export type AuctionCommand =
@@ -79,7 +111,12 @@ export type AuctionCommand =
   | { type: "select"; playerId: string }
   | { type: "sell"; playerId: string; teamId: string; price: number; idempotencyKey: string }
   | { type: "unsold"; playerId: string }
-  | { type: "reverse"; saleId: string; reason: string };
+  /** Replace a live sale with a corrected team and/or price (atomic: reverse + new sale). */
+  | { type: "correct"; saleId: string; teamId: string; price: number; reason: string; idempotencyKey: string }
+  /** Reverse a live sale; the player becomes UNSOLD and can be sold again later. */
+  | { type: "undo"; saleId: string; reason: string; idempotencyKey: string }
+  /** Return an UNSOLD player to AVAILABLE. */
+  | { type: "reopen"; playerId: string; reason: string; idempotencyKey: string };
 
 export interface PoolInput {
   teams: { id: string; name: string; order: number }[];
@@ -88,5 +125,13 @@ export interface PoolInput {
 }
 
 export type CommandResult =
-  | { ok: true; snapshot: AuctionSnapshot; saleId?: string; duplicate?: boolean }
-  | { ok: false; code: string; message: string; snapshot?: AuctionSnapshot };
+  | { ok: true; snapshot: AuctionSnapshot; saleId?: string; duplicate?: boolean; reset?: ResetOutcome }
+  | { ok: false; code: string; message: string; snapshot?: AuctionSnapshot; backup?: ResetBackupInfo };
+
+/** HARD RESET request (dedicated endpoint only; never part of AuctionCommand). */
+export interface ResetRequest {
+  requestId: string;
+  phrase: string;
+  acknowledged: boolean;
+  environment: ResetEnvironment;
+}

@@ -46,7 +46,8 @@ export function useAuctionLive(initial: AuctionSnapshot | null) {
         if (e.data === "pong") return;
         try {
           const msg = JSON.parse(String(e.data)) as { type: string; snapshot?: AuctionSnapshot };
-          if (msg.type === "state" && msg.snapshot) apply(msg.snapshot);
+          // "reset" carries the fresh post-reset state (AUCTION_RESET); it is applied like any newer snapshot.
+          if ((msg.type === "state" || msg.type === "reset") && msg.snapshot) apply(msg.snapshot);
         } catch {
           /* ignore malformed frames */
         }
