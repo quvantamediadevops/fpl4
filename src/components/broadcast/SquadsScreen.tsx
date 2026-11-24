@@ -3,7 +3,7 @@
 import { AnimatePresence, m } from "motion/react";
 import { Crown } from "lucide-react";
 import type { AuctionSnapshot, AuctionTeamView } from "@/auction/types";
-import { TONE_TEXT, TeamLogo, budgetTone, inr } from "@/components/auction/bits";
+import { IconPhoto, TONE_TEXT, TeamLogo, budgetTone, inr } from "@/components/auction/bits";
 import { cn } from "@/lib/utils";
 import type { PlayerRole } from "@/types/player";
 import { BroadcastShell } from "./BroadcastShell";
@@ -91,6 +91,7 @@ function TeamPanel({ team, index, playersPerTeam, changes }: { team: AuctionTeam
           <span className="inline-flex shrink-0 items-center gap-1 rounded bg-gold px-1.5 py-0.5 text-[clamp(0.48rem,0.52vw,0.64rem)] font-black tracking-[0.16em] text-[#111827]">
             <Crown className="size-[1.1em]" aria-hidden="true" /> ICON
           </span>
+          <IconPhoto teamId={team.id} name={team.icon?.name} className="size-[clamp(1.25rem,2.3vh,1.65rem)]" />
           <span className="min-w-0 truncate font-display text-[clamp(0.9rem,1.02vw,1.25rem)] font-bold uppercase">{team.icon?.name ?? "—"}</span>
           <span className="ml-auto shrink-0 text-[clamp(0.48rem,0.52vw,0.64rem)] font-bold tracking-[0.12em] text-gold-light/70">₹0</span>
         </span>

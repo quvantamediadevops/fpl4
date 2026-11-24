@@ -4,7 +4,7 @@ import { AnimatePresence, m, useReducedMotion } from "motion/react";
 import { Crown } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { AuctionEventView, AuctionPlayerView, AuctionSnapshot, AuctionTeamView } from "@/auction/types";
-import { TONE_BAR, TONE_TEXT, TeamLogo, budgetTone, inr, roleText } from "@/components/auction/bits";
+import { IconPhoto, TONE_BAR, TONE_TEXT, TeamLogo, budgetTone, inr, roleText } from "@/components/auction/bits";
 import { Emblem } from "@/components/layout/Logo";
 import { PlayerPhoto } from "@/components/players/PlayerPhoto";
 import { useFitText } from "@/components/presentation/useFitText";
@@ -286,7 +286,7 @@ function IconPlayers({ s }: { s: AuctionSnapshot }) {
       <ul className="mt-[clamp(0.5rem,1vh,0.75rem)] grid grid-cols-2 gap-[clamp(0.3rem,0.5vw,0.5rem)]">
         {s.teams.map((t) => (
           <li key={t.id} className="flex items-center gap-2 rounded-lg bg-white/[0.035] px-2 py-[clamp(0.25rem,0.55vh,0.45rem)]">
-            <TeamLogo team={t} className="size-[clamp(1.6rem,3.2vh,2.2rem)] text-[8px]" />
+            <IconPhoto teamId={t.id} name={t.icon?.name} className="size-[clamp(1.6rem,3.2vh,2.2rem)]" />
             <span className="min-w-0 flex-1 leading-tight">
               <span className="block truncate font-display text-[clamp(0.9rem,1vw,1.15rem)] font-bold uppercase">{t.icon?.name ?? "—"}</span>
               <span className="block truncate text-[clamp(0.52rem,0.56vw,0.66rem)] font-bold tracking-[0.14em] text-white/45">{t.name}</span>

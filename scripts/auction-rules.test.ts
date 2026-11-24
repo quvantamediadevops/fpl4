@@ -265,3 +265,38 @@ test("super-admin list: empty means nobody; names normalised; junk ignored", () 
   assert.ok(REQUEST_ID.test(crypto.randomUUID()));
   assert.ok(!REQUEST_ID.test("not-a-uuid"));
 });
+
+// ---- ICON photos (config → /public/icons) ----
+import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { teams as tournamentTeams } from "../src/config/tournament.ts";
+import { iconPhotoOf } from "../src/lib/icon-photo.ts";
+
+// The organisers' list: ICON → the team they belong to (by team slug).
+const ICON_PHOTO_MAP: Record<string, string> = {
+  msct: "SONU", "star-xi": "AJIT (AJU)", iconic: "RABI", "limited-lions": "RAJA",
+  rkct: "AYUSH", "royal-boyzz": "SINKU", myct: "VIJAY (BIJU)", bajarangmonks: "SACHIN",
+};
+
+test("every team's ICON has its own photo file, mapped by team slug", () => {
+  assert.equal(tournamentTeams.length, 8);
+  const hashes = new Set<string>();
+  for (const t of tournamentTeams) {
+    assert.equal(t.icon, ICON_PHOTO_MAP[t.slug], `${t.slug}: ICON name unchanged`);
+    assert.equal(t.iconPhoto, `/icons/${t.slug}.webp`, `${t.slug}: photo path`);
+    const file = `public${t.iconPhoto}`;
+    assert.ok(existsSync(file), `${file} exists`);
+    hashes.add(createHash("sha256").update(readFileSync(file)).digest("hex"));
+  }
+  assert.equal(hashes.size, 8, "no duplicated photo");
+});
+
+test("an ICON photo is only shown for that team's configured ICON", () => {
+  const msct = tournamentTeams.find((t) => t.slug === "msct");
+  assert.equal(iconPhotoOf(msct, "SONU"), "/icons/msct.webp");
+  assert.equal(iconPhotoOf(msct, "  sonu "), "/icons/msct.webp");
+  assert.equal(iconPhotoOf(msct, "SACHIN"), undefined, "a different ICON never gets this photo");
+  assert.equal(iconPhotoOf(msct, null), undefined);
+  assert.equal(iconPhotoOf(undefined, "SONU"), undefined);
+  assert.equal(iconPhotoOf({ icon: "X", iconPhoto: undefined }, "X"), undefined);
+});

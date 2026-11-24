@@ -10,6 +10,8 @@ export interface Team {
   monogram: string;
   /** Official logo under /public, e.g. /Teamlogo/MSCT.jpeg (initials shown if missing or it fails to load). */
   logo?: string;
+  /** The icon player's photo under /public, e.g. /icons/msct.webp (a crown is shown if missing or it fails to load). */
+  iconPhoto?: string;
 }
 
 export type MatchStatus = "SCHEDULED" | "LIVE" | "COMPLETED" | "POSTPONED" | "CANCELLED";

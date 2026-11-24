@@ -1,9 +1,12 @@
 "use client";
 
+import { Crown } from "lucide-react";
 import Image from "next/image";
 import { useState } from "react";
 import { formatInr } from "@/auction/rules";
 import type { AuctionSnapshot, AuctionTeamView } from "@/auction/types";
+import { teams } from "@/config/tournament";
+import { iconPhotoOf } from "@/lib/icon-photo";
 import { cn, initials } from "@/lib/utils";
 import type { PlayerRole } from "@/types/player";
 import type { Connection } from "./useAuctionLive";
@@ -61,6 +64,23 @@ export function TeamLogo({ team, className }: { team: Pick<AuctionTeamView, "nam
       ) : (
         <span className="absolute inset-0 grid place-items-center text-[0.65em] font-black text-gold-light" aria-label={`${team.name} logo`}>
           {initials(team.name)}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** ICON player's photo (decorative: the name is always shown beside it); crown if there is none or it fails to load. */
+export function IconPhoto({ teamId, name, className }: { teamId: string; name: string | null | undefined; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  const src = iconPhotoOf(teams.find((t) => t.slug === teamId), name);
+  return (
+    <span className={cn("relative block shrink-0 overflow-hidden rounded-full bg-[#0b1220] ring-1 ring-gold/60", className)}>
+      {src && !failed ? (
+        <Image src={src} alt="" fill sizes="96px" className="object-cover" onError={() => setFailed(true)} />
+      ) : (
+        <span className="absolute inset-0 grid place-items-center text-gold-light" aria-hidden="true">
+          <Crown className="size-1/2" />
         </span>
       )}
     </span>

@@ -2,6 +2,8 @@
 
 import { m } from "motion/react";
 import { Crown, Star, type LucideIcon } from "lucide-react";
+import Image from "next/image";
+import { useState } from "react";
 import type { Team } from "@/types/tournament";
 import { TeamCrest } from "@/components/teams/TeamCrest";
 
@@ -10,7 +12,8 @@ export const teamCardVariants = {
   show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.22, 1, 0.36, 1] as const } },
 };
 
-function Role({ icon: Icon, label, value, tone }: { icon: LucideIcon; label: string; value: string; tone: "gold" | "blue" }) {
+function Role({ icon: Icon, label, value, tone, photo }: { icon: LucideIcon; label: string; value: string; tone: "gold" | "blue"; photo?: string }) {
+  const [failed, setFailed] = useState(false);
   return (
     <div className="min-w-0">
       <dt className="flex items-center gap-1.5 text-[10px] font-bold tracking-[0.14em] text-muted uppercase">
@@ -22,7 +25,19 @@ function Role({ icon: Icon, label, value, tone }: { icon: LucideIcon; label: str
         />
         {label}
       </dt>
-      <dd className="mt-1 text-[14px] leading-snug font-bold tracking-tight break-words text-navy sm:text-[15px]">{value}</dd>
+      <dd className="mt-1 flex min-w-0 items-center gap-2 text-[14px] leading-snug font-bold tracking-tight break-words text-navy sm:text-[15px]">
+        {photo && !failed && (
+          <Image
+            src={photo}
+            alt=""
+            width={36}
+            height={36}
+            className="size-8 shrink-0 rounded-full object-cover ring-2 ring-bat/30 sm:size-9"
+            onError={() => setFailed(true)}
+          />
+        )}
+        <span className="min-w-0">{value}</span>
+      </dd>
     </div>
   );
 }
@@ -77,7 +92,7 @@ export function TeamCard({ team }: { team: Team }) {
         </h2>
         <dl className="mt-3 grid grid-cols-2 gap-3 border-t border-line pt-3 sm:mt-auto sm:pt-4">
           <Role icon={Crown} label="Owner" value={team.owner} tone="gold" />
-          <Role icon={Star} label="Icon" value={team.icon} tone="blue" />
+          <Role icon={Star} label="Icon" value={team.icon} tone="blue" photo={team.iconPhoto} />
         </dl>
       </div>
     </m.article>
