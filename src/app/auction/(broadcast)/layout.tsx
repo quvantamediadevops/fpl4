@@ -15,7 +15,7 @@ const display = Barlow_Condensed({ subsets: ["latin"], weight: ["600", "700", "8
  */
 export default async function BroadcastLayout({ children }: { children: ReactNode }) {
   await connection(); // always rendered per request: live data
-  const devNotice = auctionDevNotice("/player-presentation");
+  const devNotice = auctionDevNotice("/auction/player-presentation");
   if (devNotice) return devNotice;
   const env = auctionEnv();
   if (!env) return <AuctionUnavailable title="Auction not connected" detail="The auction database is not configured for this site yet." />;

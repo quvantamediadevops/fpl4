@@ -14,9 +14,9 @@ import { ArenaBackdrop } from "./ArenaBackdrop";
 import { useLive } from "./LiveProvider";
 
 export const SCREENS = [
-  { key: "1", href: "/player-presentation", label: "PLAYERS", title: "Player presentation" },
-  { key: "2", href: "/team-squads", label: "SQUADS", title: "Team squads live" },
-  { key: "3", href: "/auction-summary", label: "SUMMARY", title: "Auction summary" },
+  { key: "1", href: "/auction/player-presentation", label: "PLAYERS", title: "Player presentation" },
+  { key: "2", href: "/auction/team-squads", label: "SQUADS", title: "Team squads live" },
+  { key: "3", href: "/auction/auction-summary", label: "SUMMARY", title: "Auction summary" },
 ] as const;
 
 const IDLE_MS = 2500;

@@ -5,12 +5,12 @@ import { PlayerPresentation } from "@/components/presentation/PlayerPresentation
 import { StadiumBackdrop } from "@/components/presentation/StadiumBackdrop";
 
 export const metadata: Metadata = {
-  title: "Player Introductions",
+  title: "Player Presentation",
   description: "Full-screen player introductions for Fertilizer Premier League – Season 4.",
   robots: { index: false, follow: false },
 };
 
-export default async function PlayerIntroductionsPage({ searchParams }: PageProps<"/player-introductions">) {
+export default async function PlayerPresentationPage({ searchParams }: PageProps<"/player-presentation">) {
   const [directory, params] = await Promise.all([getPlayerDirectory(), searchParams]);
 
   if (!directory.ok) {
@@ -48,7 +48,7 @@ function PresentationMessage({ title, description, retry = false }: { title: str
         <p className="mt-4 text-base text-white/65 sm:text-lg">{description}</p>
         {retry && (
           <Link
-            href="/player-introductions"
+            href="/player-presentation"
             prefetch={false}
             className="mt-8 inline-flex h-12 items-center rounded-full border border-gold/60 px-6 text-sm font-bold tracking-[0.2em] text-gold-light transition hover:bg-gold/15"
           >

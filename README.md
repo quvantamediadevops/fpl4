@@ -227,7 +227,7 @@ Before the first push: `git init`, then confirm `git status` does not list `.env
 
 ## 8. Player auction (physical auction system)
 
-Routes: `/auction/admin` (control room, sign-in required) and three public, read-only broadcast screens: `/player-presentation` (player on the block, recent purchases, icons, budgets), `/team-squads` (all eight squads live) and `/auction-summary` (totals, top buys, franchise spending). On a broadcast screen press **1**, **2**, **3** to switch screens and **F** for fullscreen; the screens share one live connection, so switching keeps fullscreen. `/auction/presenter` and `/auction/teams` redirect to the new screens. The pre-auction registration slideshow is at `/player-introductions`. All are `noindex, nofollow`.
+Routes: `/auction/admin` (control room, sign-in required) and three public, read-only broadcast screens: `/auction/player-presentation` (player on the block, recent purchases, icons, budgets), `/auction/team-squads` (all eight squads live) and `/auction/auction-summary` (totals, top buys, franchise spending). On a broadcast screen press **1**, **2**, **3** to switch screens and **F** for fullscreen; the screens share one live connection, so switching keeps fullscreen. `/auction/presenter`, `/auction/teams`, `/team-squads` and `/auction-summary` redirect to these screens. The pre-auction player introduction (shared with owners for the ICON list and team strategy) is at `/player-presentation`. All are `noindex, nofollow`.
 
 **How it works**
 - Teams bid in the room; the admin records the result. There is no online bidding.
@@ -246,7 +246,7 @@ Routes: `/auction/admin` (control room, sign-in required) and three public, read
 
 **On the day**
 1. Sign in at `/auction/admin`, press **Load pool from registrations** (copies the current registrations; must be exactly 8 × 11 = 88), check the icons, then **Start auction**.
-2. Open `/player-presentation` on the big screen and press **F** (fullscreen). Switch to the squads (**2**) or summary (**3**) at any time.
+2. Open `/auction/player-presentation` on the big screen and press **F** (fullscreen). Switch to the squads (**2**) or summary (**3**) at any time.
 3. Per player: select → physical bidding → choose the winning team and price → **Confirm sold** (or **Mark unsold**; unsold players can be selected again later).
 4. Mistakes: **Correct / Undo** on the sale under **Recent Sales** (or in **Auction History & Corrections**), with a mandatory reason:
    - **Correct Price**, **Change Team** or **Correct Price & Team**: the original sale is reversed and a corrected sale recorded in one transaction; budgets and squads are recalculated from live sales.

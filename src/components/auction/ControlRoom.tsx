@@ -105,10 +105,10 @@ export function ControlRoom({ initial, adminId, csrf, danger }: { initial: Aucti
           <ConnectionPill connection={connection} />
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <StatusControls status={s.status} busy={busy} onAction={(action) => setDialog({ kind: "status", action })} />
-            <a href="/player-presentation" target="_blank" rel="noopener" className="btn-ghost" title="Public screens: 1 Players · 2 Squads · 3 Summary">
+            <a href="/auction/player-presentation" target="_blank" rel="noopener" className="btn-ghost" title="Public screens: 1 Players · 2 Squads · 3 Summary">
               <ExternalLink className="size-4" aria-hidden="true" /> Presenter
             </a>
-            <a href="/team-squads" target="_blank" rel="noopener" className="btn-ghost hidden md:inline-flex">
+            <a href="/auction/team-squads" target="_blank" rel="noopener" className="btn-ghost hidden md:inline-flex">
               <Users className="size-4" aria-hidden="true" /> Squads
             </a>
             <span className="hidden text-xs text-white/50 md:inline">
@@ -203,10 +203,10 @@ export function ControlRoom({ initial, adminId, csrf, danger }: { initial: Aucti
             <a href="/auction/admin/report" target="_blank" rel="noopener" className="btn-ghost">
               <Printer className="size-4" aria-hidden="true" /> Printable team report
             </a>
-            <a href="/team-squads" target="_blank" rel="noopener" className="btn-ghost">
+            <a href="/auction/team-squads" target="_blank" rel="noopener" className="btn-ghost">
               <Users className="size-4" aria-hidden="true" /> Team Squads Live
             </a>
-            <a href="/auction-summary" target="_blank" rel="noopener" className="btn-ghost">
+            <a href="/auction/auction-summary" target="_blank" rel="noopener" className="btn-ghost">
               <Trophy className="size-4" aria-hidden="true" /> Auction summary
             </a>
           </div>
